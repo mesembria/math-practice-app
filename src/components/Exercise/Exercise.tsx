@@ -18,7 +18,7 @@ interface Problem {
 const Exercise: React.FC<ExerciseProps> = ({
   numberOfProblems = 10,
   minFactor = 2,
-  maxFactor = 10,
+  maxFactor = 12,
 }) => {
   // State management
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -110,27 +110,43 @@ const Exercise: React.FC<ExerciseProps> = ({
           className="w-full min-h-[120px] text-5xl md:text-6xl"
         />
 
-        <NumericKeyboard
-          value={currentAnswer}
-          onChange={setCurrentAnswer}
-          onSubmit={currentAnswer !== '0' ? handleNext : undefined}
-          maxLength={3}
-          className="w-full max-w-md"
-        />
-
-        <button
-          onClick={handleNext}
-          disabled={currentAnswer === '0'}
-          className={`
-            w-full max-w-md py-4 px-8 rounded-xl text-xl font-semibold
-            transition-colors duration-150
-            ${currentAnswer === '0'
-              ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'}
-          `}
-        >
-          Next
-        </button>
+        <div className="flex gap-2 w-full max-w-md">
+          <NumericKeyboard
+            value={currentAnswer}
+            onChange={setCurrentAnswer}
+            onSubmit={currentAnswer !== '0' ? handleNext : undefined}
+            maxLength={3}
+            className="flex-1"
+          />
+          
+          <button
+            onClick={handleNext}
+            disabled={currentAnswer === '0'}
+            className={`
+              w-20 rounded-xl text-xl font-semibold p-3
+              transition-colors duration-150 flex items-center justify-center
+              h-[calc(48px*4+0.5rem*3+1.5rem*2)] sm:h-[calc(56px*4+0.5rem*3+1.5rem*2)] md:h-[calc(64px*4+0.5rem*3+1.5rem*2)]
+              ${currentAnswer === '0'
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'}
+            `}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-8 w-8"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );
