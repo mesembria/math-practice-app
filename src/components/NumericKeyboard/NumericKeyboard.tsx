@@ -74,7 +74,7 @@ const NumericKeyboard: React.FC<NumericKeyboardProps> = ({
     active:scale-95
     touch-manipulation
     select-none
-    h-16 md:h-20
+    h-12 sm:h-14 md:h-16
   `;
 
   const numberButtonStyles = `
@@ -92,7 +92,7 @@ const NumericKeyboard: React.FC<NumericKeyboardProps> = ({
 
   return (
     <div 
-      className={`grid grid-cols-3 gap-3 p-4 bg-white rounded-2xl shadow-lg ${className}`}
+      className={`grid grid-cols-3 gap-2 p-3 bg-white rounded-2xl shadow-lg ${className}`}
       role="group"
       aria-label="Numeric keyboard"
     >
@@ -105,6 +105,7 @@ const NumericKeyboard: React.FC<NumericKeyboardProps> = ({
               className={`
                 ${baseButtonStyles}
                 ${digit === 'backspace' ? backspaceButtonStyles : numberButtonStyles}
+                text-lg sm:text-xl md:text-2xl
               `}
               aria-label={digit === 'backspace' ? 'Backspace' : `Number ${digit}`}
               role={digit === 'backspace' ? 'button' : 'spinbutton'}
@@ -112,7 +113,7 @@ const NumericKeyboard: React.FC<NumericKeyboardProps> = ({
               {digit === 'backspace' ? (
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-8 w-8"
+                  className="h-5 w-5 sm:h-6 sm:w-6 md:h-7 md:w-7"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"

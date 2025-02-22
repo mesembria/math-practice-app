@@ -94,38 +94,35 @@ const Exercise: React.FC<ExerciseProps> = ({
   const currentProblem = problems[currentProblemIndex];
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[600px] gap-8 p-4">
+    <div className="flex flex-col items-center justify-center min-h-[600px] gap-4 p-4">
       <ProgressIndicator
         totalProblems={numberOfProblems}
         currentProblemIndex={currentProblemIndex}
         results={results}
-        className="w-full max-w-3xl h-3"
+        className="w-full max-w-4xl h-3"
       />
       
-      <div className="flex flex-col items-center gap-6 w-full max-w-[75%]">
+      <div className="flex flex-col items-center gap-6 w-full max-w-2xl">
         <ProblemDisplay
           factor1={currentProblem.factor1}
           factor2={currentProblem.factor2}
-          className="w-full min-h-[300px] text-7xl"
+          answer={currentAnswer}
+          className="w-full min-h-[120px] text-5xl md:text-6xl"
         />
-
-        <div className="text-5xl font-bold text-gray-800 min-h-[60px] w-full text-center">
-          {currentAnswer !== '0' ? currentAnswer : ''}
-        </div>
 
         <NumericKeyboard
           value={currentAnswer}
           onChange={setCurrentAnswer}
           onSubmit={currentAnswer !== '0' ? handleNext : undefined}
           maxLength={3}
-          className="w-full"
+          className="w-full max-w-md"
         />
 
         <button
           onClick={handleNext}
           disabled={currentAnswer === '0'}
           className={`
-            w-full py-4 px-8 rounded-xl text-xl font-semibold
+            w-full max-w-md py-4 px-8 rounded-xl text-xl font-semibold
             transition-colors duration-150
             ${currentAnswer === '0'
               ? 'bg-gray-200 text-gray-400 cursor-not-allowed'

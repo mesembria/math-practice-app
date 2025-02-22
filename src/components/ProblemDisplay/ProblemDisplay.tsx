@@ -3,12 +3,14 @@ import React from 'react';
 interface ProblemDisplayProps {
   factor1: number;
   factor2: number;
+  answer: string;
   className?: string;
 }
 
 const ProblemDisplay: React.FC<ProblemDisplayProps> = ({ 
   factor1, 
-  factor2, 
+  factor2,
+  answer,
   className = '' 
 }) => {
   // Validate prop ranges
@@ -36,7 +38,10 @@ const ProblemDisplay: React.FC<ProblemDisplayProps> = ({
         <span className="inline-block min-w-[1.5ch] text-center">{factor1}</span>
         <span className="mx-4 text-gray-600"> × </span>
         <span className="inline-block min-w-[1.5ch] text-center">{factor2}</span>
-        <span className="mx-4"> =</span>
+        <span className="mx-4">=</span>
+        <span className="inline-block min-w-[3ch] text-center text-blue-600">
+          {answer !== '0' ? answer : ''}
+        </span>
       </p>
     </div>
   );
