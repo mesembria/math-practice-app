@@ -1,14 +1,18 @@
 import { defineConfig } from 'vite'
+import { configDefaults } from 'vitest/config'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react()],
-})
 
 export default defineConfig({
   plugins: [
     tailwindcss(),
+    react()
   ],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    exclude: [...configDefaults.exclude, 'e2e/*'],
+    css: true
+  }
 })
