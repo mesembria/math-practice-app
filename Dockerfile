@@ -12,8 +12,8 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# Build TypeScript files first, then run Vite build
+RUN npm run tsc && npm run vite:build
 
 # Stage 2: Serve the built application
 FROM nginx:alpine
