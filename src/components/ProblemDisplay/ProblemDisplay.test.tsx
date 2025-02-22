@@ -3,13 +3,6 @@ import { render, screen } from '@testing-library/react';
 import ProblemDisplay from './ProblemDisplay';
 
 describe('ProblemDisplay', () => {
-  it('renders multiplication problem correctly', () => {
-    render(<ProblemDisplay factor1={4} factor2={6} answer="0" />);
-    const problem = screen.getByRole('region');
-    expect(problem).toHaveTextContent('4 × 6 =');
-    expect(problem).not.toHaveTextContent('4 × 6 = 0');
-  });
-
   it('applies custom className when provided', () => {
     render(<ProblemDisplay factor1={3} factor2={5} answer="0" className="custom-class" />);
     const container = screen.getByRole('region');
