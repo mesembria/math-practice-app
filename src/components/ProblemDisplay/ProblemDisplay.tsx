@@ -28,11 +28,10 @@ const ProblemDisplay: React.FC<ProblemDisplayProps> = ({
       aria-label="multiplication problem"
     >
       <p 
-        className="
-          text-5xl md:text-6xl font-semibold
-          text-gray-800 tracking-wide
-          font-['Arial']
-        "
+        className={`
+          font-semibold text-gray-800 tracking-wide font-['Arial']
+          ${className.includes('text-') ? '' : 'text-5xl md:text-6xl'}
+        `}
       >
         <span className="inline-block min-w-[1.5ch] text-center">{factor1}</span>
         <span className="mx-4 text-gray-600"> × </span>
