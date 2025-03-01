@@ -1,154 +1,214 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import ProblemDisplay from '../ProblemDisplay/ProblemDisplay';
-import NumericKeyboard from '../NumericKeyboard/NumericKeyboard';
-import ProgressIndicator from '../ProgressIndicator/ProgressIndicator';
+// src/components/Exercise/Exercise.tsx
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { api, SessionSummary as SessionSummaryType } from '../../services/api';
+import ExerciseView from './ExerciseView';
+import CompletionMessage from './CompletionMessage';
+import SessionSummary from '../SessionSummary/SessionSummary';
+import LoadingView from './LoadingView';
+import ErrorView from './ErrorView';
 
-interface ExerciseProps {
-  numberOfProblems?: number;
-  minFactor?: number;
-  maxFactor?: number;
-}
+import { Problem } from './types';
+import { useExerciseTimer } from './hooks/useExercise';
 
-interface Problem {
-  factor1: number;
-  factor2: number;
-  answer: number;
-}
-
-const Exercise: React.FC<ExerciseProps> = ({
-  numberOfProblems = 10,
-  minFactor = 2,
-  maxFactor = 12,
-}) => {
-  // State management
-  const [problems, setProblems] = useState<Problem[]>([]);
-  const [currentProblemIndex, setCurrentProblemIndex] = useState(0);
+/**
+ * Container component that manages the state and data fetching for the exercise
+ */
+const Exercise: React.FC = () => {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
+  const [currentProblem, setCurrentProblem] = useState<Problem | null>(null);
   const [currentAnswer, setCurrentAnswer] = useState('0');
   const [results, setResults] = useState<Array<boolean | null>>([]);
   const [isComplete, setIsComplete] = useState(false);
+  const [sessionSummary, setSessionSummary] = useState<SessionSummaryType | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [totalProblems, setTotalProblems] = useState(0);
+  const [showCompletionMessage, setShowCompletionMessage] = useState(false);
+  const [correctCount, setCorrectCount] = useState(0);
 
-  // Generate random problems
-  const generateProblems = useCallback(() => {
-    setIsLoading(true);
-    const newProblems: Problem[] = Array.from({ length: numberOfProblems }, () => {
-      const factor1 = Math.floor(Math.random() * (maxFactor - minFactor + 1)) + minFactor;
-      const factor2 = Math.floor(Math.random() * (maxFactor - minFactor + 1)) + minFactor;
-      return {
-        factor1,
-        factor2,
-        answer: factor1 * factor2,
-      };
-    });
-    setProblems(newProblems);
-    setResults(new Array(numberOfProblems).fill(null));
-    setIsLoading(false);
-  }, [numberOfProblems, minFactor, maxFactor]);
+  const { 
+    setStartTime, 
+    isPaused,
+    togglePause, 
+    calculateResponseTime, 
+    resetTimer 
+  } = useExerciseTimer();
 
-  // Initialize problems on mount
+  // Fetch session and first problem on mount
   useEffect(() => {
-    generateProblems();
-  }, [generateProblems]);
+    const fetchSessionAndProblem = async () => {
+      try {
+        if (!sessionId) {
+          throw new Error('No session ID provided');
+        }
+        
+        const parsedSessionId = parseInt(sessionId);
+        
+        // First get the session details
+        const session = await api.getSession(parsedSessionId);
+        setTotalProblems(session.total_problems);
+        
+        // Check if session is already completed
+        if (session.is_completed) {
+          // If completed, fetch the session results instead of the next problem
+          try {
+            // Get all attempts for this session to calculate correct count
+            const attempts = await api.getSessionAttempts(parsedSessionId);
+            const correctOnes = attempts.filter(a => a.isCorrect).length;
+            setCorrectCount(correctOnes);
+            
+            // Get the full session summary
+            const summary = await api.getSessionSummary(parsedSessionId);
+            setSessionSummary(summary);
+            setIsComplete(true);
+            setIsLoading(false);
+          } catch (summaryErr) {
+            console.error('Error fetching completed session summary:', summaryErr);
+            setError('Unable to load the session results. Please return to home and try again.');
+            setIsLoading(false);
+          }
+          return;
+        }
+        
+        // For active sessions, get the next problem
+        try {
+          const problem = await api.getNextProblem(parsedSessionId);
+          setCurrentProblem(problem);
+          setResults(new Array(session.total_problems).fill(null));
+          setStartTime(Date.now());
+          setIsLoading(false);
+        } catch (problemErr) {
+          console.error('Error fetching problem:', problemErr);
+          setError('Failed to load exercise problems. Please try again.');
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error('Error fetching session:', err);
+        setError('Failed to load exercise session. Please try again.');
+        setIsLoading(false);
+      }
+    };
+
+    fetchSessionAndProblem();
+  }, [sessionId, setStartTime]);
 
   // Handle answer submission
-  const handleNext = useCallback(() => {
-    const currentProblem = problems[currentProblemIndex];
-    const isCorrect = parseInt(currentAnswer) === currentProblem.answer;
+  const handleNext = async () => {
+    if (!currentProblem || !sessionId || isPaused) return;
+
+    const responseTimeMs = calculateResponseTime();
     
-    // Update results
-    const newResults = [...results];
-    newResults[currentProblemIndex] = isCorrect;
-    setResults(newResults);
+    try {
+      const result = await api.submitAttempt(
+        parseInt(sessionId),
+        currentProblem.problemId,
+        parseInt(currentAnswer),
+        responseTimeMs
+      );
 
-    // Move to next problem or complete
-    if (currentProblemIndex < numberOfProblems - 1) {
-      setCurrentProblemIndex(currentProblemIndex + 1);
-      setCurrentAnswer('0');
-    } else {
-      setIsComplete(true);
+      // Update results at current index
+      const newResults = [...results];
+      const currentIndex = newResults.findIndex(r => r === null);
+      if (currentIndex !== -1) {
+        newResults[currentIndex] = result.isCorrect;
+        setResults(newResults);
+      }
+
+      // Update correct count
+      if (result.isCorrect) {
+        setCorrectCount(prev => prev + 1);
+      }
+
+      if (result.isSessionComplete && result.sessionSummary) {
+        // Show completion message briefly before showing full summary
+        setShowCompletionMessage(true);
+        setIsComplete(true);
+        setSessionSummary(result.sessionSummary);
+        
+        // After 2 seconds, hide the completion message to show the full summary
+        setTimeout(() => {
+          setShowCompletionMessage(false);
+        }, 2000);
+      } else {
+        // Fetch next problem
+        const nextProblem = await api.getNextProblem(parseInt(sessionId));
+        setCurrentProblem(nextProblem);
+        setCurrentAnswer('0');
+        resetTimer();
+      }
+    } catch (err: unknown) {
+      console.error('Error submitting attempt:', err);
+      setError('Failed to submit answer. Please try again.');
     }
-  }, [currentAnswer, currentProblemIndex, numberOfProblems, problems, results]);
+  };
 
-  if (isComplete) {
-    const correctCount = results.filter(result => result === true).length;
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[600px] gap-8 p-4">
-        <h2 className="text-2xl font-bold text-gray-800">
-          Exercise Complete!
-        </h2>
-        <p className="text-xl text-gray-600">
-          You got {correctCount} out of {numberOfProblems} correct!
-        </p>
-      </div>
-    );
+  // Handle keyboard shortcuts for pause/resume
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'p' || e.key === 'P') {
+        togglePause();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePause]);
+
+  if (error) {
+    return <ErrorView error={error} onReturnHome={() => navigate('/')} />;
   }
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[600px]">
-        <p className="text-xl text-gray-600">Loading problems...</p>
-      </div>
-    );
+    return <LoadingView />;
   }
 
-  const currentProblem = problems[currentProblemIndex];
+  if (isComplete) {
+    if (showCompletionMessage) {
+      return (
+        <CompletionMessage 
+          correctCount={correctCount} 
+          totalProblems={totalProblems} 
+        />
+      );
+    }
+
+    if (sessionSummary) {
+      return (
+        <div className="flex flex-col items-center min-h-[600px] gap-8 p-4">
+          <h2 className="text-2xl font-bold text-gray-800">
+            Exercise Results
+          </h2>
+          <SessionSummary summary={sessionSummary} />
+          <div className="flex gap-4">
+            <button
+              onClick={() => navigate('/')}
+              className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+            >
+              Start New Session
+            </button>
+          </div>
+        </div>
+      );
+    }
+  }
+
+  if (!currentProblem) {
+    return <ErrorView error="Problem data is missing" onReturnHome={() => navigate('/')} />;
+  }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[600px] gap-4 p-4">
-      <ProgressIndicator
-        totalProblems={numberOfProblems}
-        currentProblemIndex={currentProblemIndex}
-        results={results}
-        className="w-full max-w-4xl h-3"
-      />
-      
-      <div className="flex flex-col items-center gap-6 w-full max-w-2xl">
-        <ProblemDisplay
-          factor1={currentProblem.factor1}
-          factor2={currentProblem.factor2}
-          answer={currentAnswer}
-          className="w-full min-h-[120px] text-5xl md:text-6xl"
-        />
-
-        <div className="flex gap-2 w-full max-w-md">
-          <NumericKeyboard
-            value={currentAnswer}
-            onChange={setCurrentAnswer}
-            onSubmit={currentAnswer !== '0' ? handleNext : undefined}
-            maxLength={3}
-            className="flex-1"
-          />
-          
-          <button
-            onClick={handleNext}
-            disabled={currentAnswer === '0'}
-            className={`
-              w-20 rounded-xl text-xl font-semibold p-3
-              transition-colors duration-150 flex items-center justify-center
-              h-[calc(48px*4+0.5rem*3+1.5rem*2)] sm:h-[calc(56px*4+0.5rem*3+1.5rem*2)] md:h-[calc(64px*4+0.5rem*3+1.5rem*2)]
-              ${currentAnswer === '0'
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'}
-            `}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-8 w-8"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
-    </div>
+    <ExerciseView
+      currentProblem={currentProblem}
+      currentAnswer={currentAnswer}
+      setCurrentAnswer={setCurrentAnswer}
+      results={results}
+      totalProblems={totalProblems}
+      isPaused={isPaused}
+      togglePause={togglePause}
+      handleNext={handleNext}
+    />
   );
 };
 

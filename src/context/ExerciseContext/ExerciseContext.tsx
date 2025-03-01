@@ -37,7 +37,7 @@ const createInitialState = (numberOfProblems: number, minFactor: number, maxFact
     isComplete: false,
     isPaused: false,
     isRetryMode: false,
-    results: [],
+    results: new Array(numberOfProblems).fill(null),
     startTime: Date.now(),
     problemStartTime: Date.now()
   };
@@ -54,14 +54,15 @@ const exerciseReducer = (state: ExerciseState, action: ExerciseAction): Exercise
     case 'SUBMIT_ANSWER': {
       const currentProblem = state.problems[state.currentIndex];
       const isCorrect = parseInt(state.currentAnswer) === currentProblem.answer;
-      const newResults = [...state.results, isCorrect];
+      const newResults = [...state.results];
+      newResults[state.currentIndex] = isCorrect;
       
       return {
         ...state,
         results: newResults,
         isRetryMode: !isCorrect,
         currentAnswer: '',
-        isComplete: newResults.length === state.problems.length,
+        isComplete: state.currentIndex === state.problems.length - 1 && isCorrect,
         problemStartTime: Date.now()
       };
     }
@@ -92,7 +93,7 @@ const exerciseReducer = (state: ExerciseState, action: ExerciseAction): Exercise
         isComplete: false,
         isPaused: false,
         isRetryMode: false,
-        results: [],
+        results: new Array(state.problems.length).fill(null),
         startTime: Date.now(),
         problemStartTime: Date.now()
       };
@@ -173,7 +174,7 @@ export const ExerciseProvider: React.FC<ExerciseProviderProps> = ({
       restartExercise,
       isLastProblem: state.currentIndex === state.problems.length - 1,
       currentProblem: state.problems[state.currentIndex],
-      percentComplete: (state.results.length / state.problems.length) * 100,
+      percentComplete: (state.results.filter(result => result !== null).length / state.problems.length) * 100,
       timeElapsed: now - state.startTime
     };
   }, [

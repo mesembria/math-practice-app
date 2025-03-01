@@ -19,9 +19,11 @@ describe('ExerciseContext', () => {
   );
 
   describe('Initial State', () => {
-    it('should initialize with correct number of problems', () => {
+    it('should initialize with correct number of problems and null results', () => {
       const { result } = renderHook(() => useExercise(), { wrapper });
       expect(result.current.state.problems.length).toBe(5);
+      expect(result.current.state.results).toHaveLength(5);
+      expect(result.current.state.results.every(r => r === null)).toBe(true);
     });
 
     it('should generate problems within factor range', () => {
@@ -136,7 +138,8 @@ describe('ExerciseContext', () => {
       });
 
       expect(result.current.state.currentIndex).toBe(0);
-      expect(result.current.state.results).toHaveLength(0);
+      expect(result.current.state.results).toHaveLength(5);
+      expect(result.current.state.results.every(r => r === null)).toBe(true);
       expect(result.current.state.isComplete).toBe(false);
     });
   });
@@ -162,16 +165,25 @@ describe('ExerciseContext', () => {
       
       expect(result.current.percentComplete).toBe(0);
 
-      // Complete 2 problems
+      // Complete 2 problems correctly, 1 incorrectly
       act(() => {
-        result.current.setAnswer('42');
+        // First problem - correct
+        result.current.setAnswer(String(result.current.state.problems[0].answer));
         result.current.submitAnswer();
         result.current.nextProblem();
-        result.current.setAnswer('42');
+        
+        // Second problem - incorrect
+        result.current.setAnswer('999');
+        result.current.submitAnswer();
+        result.current.nextProblem();
+        
+        // Third problem - correct
+        result.current.setAnswer(String(result.current.state.problems[2].answer));
         result.current.submitAnswer();
       });
 
-      expect(result.current.percentComplete).toBe(40); // 2/5 * 100
+      // Should count both correct and incorrect attempts
+      expect(result.current.percentComplete).toBe(60); // 3/5 * 100 (2 correct + 1 incorrect)
     });
 
   });

@@ -1,0 +1,1989 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: **/*.test.tsx
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+
+Additional Info:
+----------------
+
+================================================================
+Directory Structure
+================================================================
+src/
+  config/
+    database.ts
+  controllers/
+    sessions.controller.ts
+    users.controller.ts
+  migrations/
+    1708642583000-InitialSchema.ts
+    1708642584000-AddUserLevel.ts
+    1708642585000-AddProblemStates.ts
+  models/
+    ExerciseSession.ts
+    index.ts
+    ProblemAttempt.ts
+    ProblemState.ts
+    ProblemStatistic.ts
+    types.ts
+    User.ts
+  routes/
+    sessions.routes.ts
+    users.routes.ts
+  scripts/
+    resetWeights.ts
+  services/
+    problemSelection/
+      __tests__/
+        selection.test.ts
+      selection.ts
+      sqliteStorage.ts
+      storage.ts
+      types.ts
+  app.ts
+  server.ts
+.dockerignore
+docker-compose.yml
+Dockerfile
+package.json
+tsconfig.json
+typeorm.config.ts
+
+================================================================
+Files
+================================================================
+
+================
+File: src/config/database.ts
+================
+import { DataSource } from "typeorm";
+import path from "path";
+import fs from "fs";
+import { User } from "../models/User";
+import { ExerciseSession } from "../models/ExerciseSession";
+import { ProblemAttempt } from "../models/ProblemAttempt";
+import { ProblemStatistic } from "../models/ProblemStatistic";
+import { ProblemState } from "../models/ProblemState";
+
+export const AppDataSource = new DataSource({
+  type: "sqlite",
+  database: process.env.NODE_ENV === "test" 
+    ? ":memory:" 
+    : path.join(__dirname, "../../data/math-practice.sqlite"),
+  entities: [
+    User,
+    ExerciseSession,
+    ProblemAttempt,
+    ProblemStatistic,
+    ProblemState
+  ],
+  synchronize: process.env.NODE_ENV === "development",
+  logging: process.env.NODE_ENV === "development",
+  migrations: [path.join(__dirname, "../migrations/*.ts")],
+});
+
+// Create data directory if it doesn't exist
+if (process.env.NODE_ENV !== "test") {
+  const dataDir = path.join(__dirname, "../../data");
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+}
+
+================
+File: src/controllers/sessions.controller.ts
+================
+import { RequestHandler } from 'express';
+import { AppDataSource } from '../config/database';
+import { ExerciseSession } from '../models/ExerciseSession';
+import { ProblemAttempt } from '../models/ProblemAttempt';
+import { ProblemStatistic } from '../models/ProblemStatistic';
+import { User } from '../models/User';
+import { problemSelector } from '../services/problemSelection/selection';
+import { ProblemHistory, DEFAULT_CONFIG } from '../services/problemSelection/types';
+
+export class SessionsController {
+  static create: RequestHandler = async (req, res) => {
+    try {
+      const { userId, totalProblems } = req.body;
+
+      if (!userId || !totalProblems) {
+        res.status(400).json({ error: 'userId and totalProblems are required' });
+        return;
+      }
+
+      const userRepository = AppDataSource.getRepository(User);
+      const user = await userRepository.findOne({ where: { id: userId } });
+
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const session = sessionRepository.create({
+        user_id: userId,
+        total_problems: totalProblems,
+        completed_problems: 0,
+        is_completed: false
+      });
+
+      await sessionRepository.save(session);
+      res.status(201).json(session);
+    } catch (error) {
+      console.error('Error creating session:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // Enhanced problem selection logic
+  static getNextProblem: RequestHandler = async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const session = await sessionRepository.findOne({ 
+        where: { id: parseInt(sessionId) },
+        relations: ['attempts', 'user']
+      });
+
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      if (session.is_completed || session.completed_problems >= session.total_problems) {
+        res.status(400).json({ error: 'Session is completed' });
+        return;
+      }
+
+      console.log(`\n[getNextProblem] Selecting problem for user ${session.user_id}, session ${sessionId}`);
+      console.log(`[getNextProblem] Progress: ${session.completed_problems}/${session.total_problems} problems`);
+
+      // Get user's problem history - include more history for better pattern detection
+      const problemRepository = AppDataSource.getRepository(ProblemAttempt);
+      const userAttempts = await problemRepository
+        .createQueryBuilder('attempt')
+        .innerJoin('attempt.session', 'session')
+        .where('session.user_id = :userId', { userId: session.user_id })
+        .orderBy('attempt.created_at', 'DESC')
+        .limit(50) // Get more history for better analysis
+        .getMany();
+
+      // Convert attempts to ProblemHistory format
+      const history: ProblemHistory[] = userAttempts.map(attempt => ({
+        factor1: attempt.factor1,
+        factor2: attempt.factor2,
+        correct: attempt.is_correct || false,
+        timeToAnswer: attempt.response_time_ms || 0,
+        timestamp: attempt.created_at.getTime()
+      }));
+
+      console.log(`[getNextProblem] Analyzed ${history.length} recent attempts`);
+
+      // Use default configuration for problem selection
+      const config = { ...DEFAULT_CONFIG };
+      console.log(`[getNextProblem] Using default factor range: ${config.minFactor}-${config.maxFactor}`);
+      
+      // Note: Not using user level as it appears to be an unused feature
+
+      // Select next problem using enhanced weight-based selection
+      const nextProblem = await problemSelector.selectNextProblem(session.user_id, history, config);
+      
+      console.log(`[getNextProblem] Selected problem: ${nextProblem.factor1} × ${nextProblem.factor2}`);
+
+      // Create and save the problem
+      const problem = problemRepository.create({
+        session_id: session.id,
+        factor1: nextProblem.factor1,
+        factor2: nextProblem.factor2,
+        attempt_number: 1
+      });
+
+      await problemRepository.save(problem);
+
+      res.json({
+        problemId: problem.id,
+        factor1: problem.factor1,
+        factor2: problem.factor2
+      });
+    } catch (error) {
+      console.error('Error getting next problem:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  static getSession: RequestHandler = async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const session = await sessionRepository.findOne({ 
+        where: { id: parseInt(sessionId) }
+      });
+
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      res.json(session);
+    } catch (error) {
+      console.error('Error getting session:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // Enhanced attempt submission and data gathering
+  static submitAttempt: RequestHandler = async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const { problemId, answer, responseTimeMs } = req.body;
+
+      if (!problemId || answer === undefined || !responseTimeMs) {
+        res.status(400).json({ error: 'problemId, answer, and responseTimeMs are required' });
+        return;
+      }
+
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const problemRepository = AppDataSource.getRepository(ProblemAttempt);
+      const statisticsRepository = AppDataSource.getRepository(ProblemStatistic);
+
+      const [session, problem] = await Promise.all([
+        sessionRepository.findOne({ 
+          where: { id: parseInt(sessionId) },
+          relations: ['user']
+        }),
+        problemRepository.findOne({ where: { id: problemId } })
+      ]);
+
+      if (!session || !problem) {
+        res.status(404).json({ error: 'Session or problem not found' });
+        return;
+      }
+
+      if (session.is_completed) {
+        res.status(400).json({ error: 'Session is already completed' });
+        return;
+      }
+
+      console.log(`\n[submitAttempt] Processing attempt for problem ${problem.factor1} × ${problem.factor2}`);
+      console.log(`[submitAttempt] User answer: ${answer}, Response time: ${responseTimeMs}ms`);
+
+      // Update problem attempt
+      const correctAnswer = problem.factor1 * problem.factor2;
+      const isCorrect = correctAnswer === answer;
+      problem.user_answer = answer;
+      problem.is_correct = isCorrect;
+      problem.response_time_ms = responseTimeMs;
+      await problemRepository.save(problem);
+
+      console.log(`[submitAttempt] Answer is ${isCorrect ? 'correct' : 'incorrect'}`);
+
+      // Update or create problem statistics for this combination
+      let statistic = await statisticsRepository.findOne({
+        where: {
+          user_id: session.user_id,
+          factor1: Math.min(problem.factor1, problem.factor2),
+          factor2: Math.max(problem.factor1, problem.factor2)
+        }
+      });
+
+      if (!statistic) {
+        statistic = statisticsRepository.create({
+          user_id: session.user_id,
+          factor1: Math.min(problem.factor1, problem.factor2),
+          factor2: Math.max(problem.factor1, problem.factor2),
+          total_attempts: 0,
+          correct_attempts: 0,
+          avg_response_time_ms: 0
+        });
+      }
+
+      // Update statistics (normalized with smaller factor first for consistency)
+      statistic.total_attempts += 1;
+      if (isCorrect) {
+        statistic.correct_attempts += 1;
+      }
+      
+      // Update average response time using weighted average
+      statistic.avg_response_time_ms = 
+        (statistic.avg_response_time_ms * (statistic.total_attempts - 1) + responseTimeMs) / 
+        statistic.total_attempts;
+      
+      await statisticsRepository.save(statistic);
+
+      // Update problem weights based on performance
+      await problemSelector.updateProblemAfterAttempt(
+        session.user_id,
+        { factor1: problem.factor1, factor2: problem.factor2 },
+        isCorrect,
+        responseTimeMs
+      );
+
+      // Update session progress
+      session.completed_problems += 1;
+      if (session.completed_problems >= session.total_problems) {
+        session.is_completed = true;
+        session.end_time = new Date();
+        
+        // Note: Not updating user level as it appears to be an unused feature
+      }
+      await sessionRepository.save(session);
+
+      // If session is complete, gather all session data with enhanced details
+      if (session.is_completed) {
+        console.log(`[submitAttempt] Session ${sessionId} is now complete!`);
+        
+        // Get all completed attempts for this session
+        const sessionAttempts = await problemRepository
+          .createQueryBuilder('attempt')
+          .where('attempt.session_id = :sessionId', { sessionId: session.id })
+          .andWhere('attempt.user_answer IS NOT NULL')
+          .orderBy('attempt.created_at', 'ASC')
+          .getMany();
+
+        console.log(`[submitAttempt] Got ${sessionAttempts.length} attempts for this session`);
+
+      // Get average response times for each problem combination
+      const avgResponseTimes = await problemRepository
+        .createQueryBuilder('attempt')
+        .innerJoin('attempt.session', 'session')
+        .select('attempt.factor1', 'factor1')
+        .addSelect('attempt.factor2', 'factor2')
+        .addSelect('AVG(attempt.response_time_ms)', 'avgTime')
+        .where('session.user_id = :userId', { userId: session.user_id })
+        .andWhere('attempt.response_time_ms IS NOT NULL')
+        .andWhere('attempt.is_correct = 1')
+        .groupBy('attempt.factor1')
+        .addGroupBy('attempt.factor2')
+        .getRawMany();
+
+      // Normalize factors after retrieving data
+      const avgTimeMap = new Map(
+        avgResponseTimes.map(avg => {
+          const smaller = Math.min(avg.factor1, avg.factor2);
+          const larger = Math.max(avg.factor1, avg.factor2);
+          return [
+            `${smaller}x${larger}`,
+            parseFloat(avg.avgTime)
+          ];
+        })
+      );
+
+        console.log(`[submitAttempt] Gathered avg response times for ${avgTimeMap.size} problem combinations`);
+
+        // Get all problem weights for this user
+        const allWeights: { factor1: number; factor2: number; weight: number }[] = [];
+        console.log('\n[submitAttempt] Fetching problem weights for user:', session.user_id);
+        
+        // Only fetch weights for problem combinations in the valid range
+        const config = DEFAULT_CONFIG;
+        for (let i = config.minFactor; i <= config.maxFactor; i++) {
+          for (let j = i; j <= config.maxFactor; j++) {
+            // The getProblemState method expects a Problem object with factor1 and factor2
+            const state = await problemSelector.getProblemState(session.user_id, { factor1: i, factor2: j });
+            
+            // Add weights for both factor orderings for easier display in frontend
+            allWeights.push({
+              factor1: i,
+              factor2: j,
+              weight: state.weight
+            });
+            
+            // Skip adding duplicate for equal factors
+            if (i !== j) {
+              allWeights.push({
+                factor1: j,
+                factor2: i,
+                weight: state.weight
+              });
+            }
+          }
+        }
+        
+        console.log(`[submitAttempt] Total weights collected: ${allWeights.length}`);
+
+        // Calculate session statistics
+        const totalCorrect = sessionAttempts.filter(a => a.is_correct).length;
+        const accuracy = (totalCorrect / sessionAttempts.length) * 100;
+        const avgTime = sessionAttempts.reduce((sum, a) => sum + (a.response_time_ms || 0), 0) / sessionAttempts.length;
+
+        console.log(`[submitAttempt] Session stats: Accuracy: ${accuracy.toFixed(1)}%, Avg Time: ${avgTime.toFixed(0)}ms`);
+
+        res.json({
+          isCorrect,
+          correctAnswer,
+          isSessionComplete: true,
+          sessionSummary: {
+            attempts: sessionAttempts.map(attempt => {
+              // Get average time for this problem combination (using normalized key)
+              const normalizedFactors = [attempt.factor1, attempt.factor2].sort((a, b) => a - b);
+              const avgTimeKey = `${normalizedFactors[0]}x${normalizedFactors[1]}`;
+              
+              return {
+                factor1: attempt.factor1,
+                factor2: attempt.factor2,
+                isCorrect: attempt.is_correct,
+                responseTime: attempt.response_time_ms,
+                averageTime: avgTimeMap.get(avgTimeKey) || null,
+                userAnswer: attempt.user_answer
+              };
+            }),
+            problemWeights: allWeights,
+            sessionStats: {
+              totalProblems: session.total_problems,
+              correctAnswers: totalCorrect,
+              accuracy: accuracy,
+              averageResponseTime: avgTime,
+              completedAt: session.end_time
+            }
+          }
+        });
+      } else {
+        res.json({
+          isCorrect,
+          correctAnswer,
+          isSessionComplete: false
+        });
+      }
+    } catch (error) {
+      console.error('Error submitting attempt:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+}
+
+// Note: User level functionality was removed as it appeared to be an unused artifact
+// The function was previously here to update user's level based on performance
+
+================
+File: src/controllers/users.controller.ts
+================
+import { RequestHandler } from 'express';
+import { AppDataSource } from '../config/database';
+import { User } from '../models/User';
+
+export class UsersController {
+  static list: RequestHandler = async (req, res) => {
+    try {
+      const userRepository = AppDataSource.getRepository(User);
+      const users = await userRepository.find({
+        select: ['id', 'name', 'is_parent'], // Only return necessary fields
+        order: { name: 'ASC' } // Sort by name
+      });
+      
+      res.json(users);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+}
+
+================
+File: src/migrations/1708642583000-InitialSchema.ts
+================
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class InitialSchema1708642583000 implements MigrationInterface {
+    name = 'InitialSchema1708642583000'
+
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
+            CREATE TABLE "users" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "name" TEXT NOT NULL,
+                "is_parent" BOOLEAN NOT NULL DEFAULT (0),
+                "created_at" DATETIME NOT NULL DEFAULT (datetime('now'))
+            )
+        `);
+
+        await queryRunner.query(`
+            CREATE TABLE "exercise_sessions" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "user_id" INTEGER NOT NULL,
+                "start_time" DATETIME NOT NULL DEFAULT (datetime('now')),
+                "end_time" DATETIME,
+                "total_problems" INTEGER NOT NULL,
+                "completed_problems" INTEGER DEFAULT (0),
+                "is_completed" BOOLEAN DEFAULT (0),
+                FOREIGN KEY ("user_id") REFERENCES "users" ("id")
+            )
+        `);
+
+        await queryRunner.query(`
+            CREATE TABLE "problem_attempts" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "session_id" INTEGER NOT NULL,
+                "factor1" INTEGER NOT NULL,
+                "factor2" INTEGER NOT NULL,
+                "user_answer" INTEGER,
+                "is_correct" BOOLEAN,
+                "response_time_ms" INTEGER,
+                "attempt_number" INTEGER DEFAULT (1),
+                "created_at" DATETIME NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY ("session_id") REFERENCES "exercise_sessions" ("id")
+            )
+        `);
+
+        await queryRunner.query(`
+            CREATE TABLE "problem_statistics" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "user_id" INTEGER NOT NULL,
+                "factor1" INTEGER NOT NULL,
+                "factor2" INTEGER NOT NULL,
+                "total_attempts" INTEGER DEFAULT (0),
+                "correct_attempts" INTEGER DEFAULT (0),
+                "avg_response_time_ms" INTEGER DEFAULT (0),
+                "last_attempt_at" DATETIME NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY ("user_id") REFERENCES "users" ("id"),
+                UNIQUE("user_id", "factor1", "factor2")
+            )
+        `);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP TABLE "problem_statistics"`);
+        await queryRunner.query(`DROP TABLE "problem_attempts"`);
+        await queryRunner.query(`DROP TABLE "exercise_sessions"`);
+        await queryRunner.query(`DROP TABLE "users"`);
+    }
+}
+
+================
+File: src/migrations/1708642584000-AddUserLevel.ts
+================
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class AddUserLevel1708642584000 implements MigrationInterface {
+    name = 'AddUserLevel1708642584000'
+
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
+            ALTER TABLE "users" 
+            ADD COLUMN "current_level" INTEGER NOT NULL DEFAULT (1)
+        `);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
+            ALTER TABLE "users" 
+            DROP COLUMN "current_level"
+        `);
+    }
+}
+
+================
+File: src/migrations/1708642585000-AddProblemStates.ts
+================
+import { MigrationInterface, QueryRunner, Table } from "typeorm";
+
+export class AddProblemStates1708642585000 implements MigrationInterface {
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.createTable(
+            new Table({
+                name: "problem_states",
+                columns: [
+                    {
+                        name: "id",
+                        type: "integer",
+                        isPrimary: true,
+                        isGenerated: true,
+                        generationStrategy: "increment"
+                    },
+                    {
+                        name: "user_id",
+                        type: "integer"
+                    },
+                    {
+                        name: "factor1",
+                        type: "integer",
+                        comment: "Always stores the smaller factor"
+                    },
+                    {
+                        name: "factor2",
+                        type: "integer",
+                        comment: "Always stores the larger factor"
+                    },
+                    {
+                        name: "weight",
+                        type: "float",
+                        default: 10 // Default weight for new problems
+                    },
+                    {
+                        name: "last_seen",
+                        type: "bigint",
+                        default: 0
+                    }
+                ],
+                indices: [
+                    {
+                        name: "IDX_problem_states_user_factors",
+                        columnNames: ["user_id", "factor1", "factor2"],
+                        isUnique: true
+                    }
+                ],
+                foreignKeys: [
+                    {
+                        columnNames: ["user_id"],
+                        referencedTableName: "users",
+                        referencedColumnNames: ["id"],
+                        onDelete: "CASCADE"
+                    }
+                ]
+            }),
+            true
+        );
+
+        // Add a trigger to ensure factor1 <= factor2 (SQLite syntax)
+        await queryRunner.query(`
+            CREATE TRIGGER IF NOT EXISTS ensure_factor_order
+            BEFORE INSERT ON problem_states
+            FOR EACH ROW
+            BEGIN
+                SELECT CASE
+                    WHEN NEW.factor1 > NEW.factor2 THEN
+                        RAISE(ABORT, 'factor1 must be less than or equal to factor2')
+                    END;
+            END;
+        `);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP TRIGGER IF EXISTS ensure_factor_order`);
+        await queryRunner.dropTable("problem_states");
+    }
+}
+
+================
+File: src/models/ExerciseSession.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, OneToMany, JoinColumn } from "typeorm";
+import { IExerciseSession, IUser, IProblemAttempt } from "./types";
+
+@Entity("exercise_sessions")
+export class ExerciseSession implements IExerciseSession {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  user_id: number;
+
+  @CreateDateColumn()
+  start_time: Date;
+
+  @Column({ nullable: true })
+  end_time: Date;
+
+  @Column()
+  total_problems: number;
+
+  @Column({ default: 0 })
+  completed_problems: number;
+
+  @Column({ default: false })
+  is_completed: boolean;
+
+  @ManyToOne("User", "sessions")
+  @JoinColumn({ name: "user_id" })
+  user: IUser;
+
+  @OneToMany("ProblemAttempt", "session")
+  attempts: IProblemAttempt[];
+}
+
+================
+File: src/models/index.ts
+================
+export { User } from "./User";
+export { ExerciseSession } from "./ExerciseSession";
+export { ProblemAttempt } from "./ProblemAttempt";
+export { ProblemStatistic } from "./ProblemStatistic";
+export { ProblemState } from "./ProblemState";
+
+================
+File: src/models/ProblemAttempt.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from "typeorm";
+import { IProblemAttempt, IExerciseSession } from "./types";
+
+@Entity("problem_attempts")
+export class ProblemAttempt implements IProblemAttempt {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  session_id: number;
+
+  @Column()
+  factor1: number;
+
+  @Column()
+  factor2: number;
+
+  @Column({ nullable: true })
+  user_answer: number;
+
+  @Column({ nullable: true })
+  is_correct: boolean;
+
+  @Column({ nullable: true })
+  response_time_ms: number;
+
+  @Column({ default: 1 })
+  attempt_number: number;
+
+  @CreateDateColumn()
+  created_at: Date;
+
+  @ManyToOne("ExerciseSession", "attempts")
+  @JoinColumn({ name: "session_id" })
+  session: IExerciseSession;
+}
+
+================
+File: src/models/ProblemState.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, BeforeInsert, BeforeUpdate, Check } from "typeorm";
+import { User } from "./User";
+
+@Entity("problem_states")
+@Check(`"factor1" <= "factor2"`) // Enforces normalization at database level
+export class ProblemState {
+    @PrimaryGeneratedColumn()
+    id: number;
+
+    @Column({ name: "user_id" })
+    userId: number;
+
+    @Column()
+    factor1: number;
+
+    @Column()
+    factor2: number;
+
+    @Column({ type: "float", default: 10 })
+    weight: number;
+
+    @Column({ name: "last_seen", type: "bigint", default: 0 })
+    lastSeen: number;
+
+    @ManyToOne(() => User, { onDelete: "CASCADE" })
+    @JoinColumn({ name: "user_id" })
+    user: User;
+
+    // This will ensure normalization at the entity level
+    @BeforeInsert()
+    @BeforeUpdate()
+    ensureNormalization() {
+        if (this.factor1 > this.factor2) {
+            // Swap the factors to ensure factor1 <= factor2
+            [this.factor1, this.factor2] = [this.factor2, this.factor1];
+        }
+    }
+}
+
+================
+File: src/models/ProblemStatistic.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, Unique, UpdateDateColumn } from "typeorm";
+import { IProblemStatistic, IUser } from "./types";
+
+@Entity("problem_statistics")
+@Unique(["user_id", "factor1", "factor2"])
+export class ProblemStatistic implements IProblemStatistic {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  user_id: number;
+
+  @Column()
+  factor1: number;
+
+  @Column()
+  factor2: number;
+
+  @Column({ default: 0 })
+  total_attempts: number;
+
+  @Column({ default: 0 })
+  correct_attempts: number;
+
+  @Column({ default: 0 })
+  avg_response_time_ms: number;
+
+  @UpdateDateColumn()
+  last_attempt_at: Date;
+
+  @ManyToOne("User", "statistics")
+  @JoinColumn({ name: "user_id" })
+  user: IUser;
+}
+
+================
+File: src/models/types.ts
+================
+export interface IUser {
+  id: number;
+  name: string;
+  is_parent: boolean;
+  current_level: number;
+  created_at: Date;
+  sessions: IExerciseSession[];
+  statistics: IProblemStatistic[];
+}
+
+export interface IExerciseSession {
+  id: number;
+  user_id: number;
+  start_time: Date;
+  end_time: Date | null;
+  total_problems: number;
+  completed_problems: number;
+  is_completed: boolean;
+  user: IUser;
+  attempts: IProblemAttempt[];
+}
+
+export interface IProblemAttempt {
+  id: number;
+  session_id: number;
+  factor1: number;
+  factor2: number;
+  user_answer: number | null;
+  is_correct: boolean | null;
+  response_time_ms: number | null;
+  attempt_number: number;
+  created_at: Date;
+  session: IExerciseSession;
+}
+
+export interface IProblemStatistic {
+  id: number;
+  user_id: number;
+  factor1: number;
+  factor2: number;
+  total_attempts: number;
+  correct_attempts: number;
+  avg_response_time_ms: number;
+  last_attempt_at: Date;
+  user: IUser;
+}
+
+================
+File: src/models/User.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from "typeorm";
+import { IUser, IExerciseSession, IProblemStatistic } from "./types";
+
+@Entity("users")
+export class User implements IUser {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  name: string;
+
+  @Column({ default: false })
+  is_parent: boolean;
+
+  @Column({ default: 1 })
+  current_level: number;
+
+  @CreateDateColumn()
+  created_at: Date;
+
+  @OneToMany("ExerciseSession", "user")
+  sessions: IExerciseSession[];
+
+  @OneToMany("ProblemStatistic", "user")
+  statistics: IProblemStatistic[];
+}
+
+================
+File: src/routes/sessions.routes.ts
+================
+import { Router } from 'express';
+import { SessionsController } from '../controllers/sessions.controller';
+
+const router = Router();
+
+router.post('/', SessionsController.create);
+router.get('/:sessionId', SessionsController.getSession);
+router.get('/:sessionId/problems/next', SessionsController.getNextProblem);
+router.post('/:sessionId/attempts', SessionsController.submitAttempt);
+
+export default router;
+
+================
+File: src/routes/users.routes.ts
+================
+import { Router } from 'express';
+import { UsersController } from '../controllers/users.controller';
+
+const router = Router();
+
+router.get('/', UsersController.list);
+
+export default router;
+
+================
+File: src/scripts/resetWeights.ts
+================
+// backend/src/scripts/resetWeights.ts
+// Script to reset problem weights and statistics while preserving users
+
+import { AppDataSource } from "../config/database";
+import { User } from "../models/User";
+import { ProblemState } from "../models/ProblemState";
+import { ProblemStatistic } from "../models/ProblemStatistic";
+
+/**
+ * Resets problem weights and statistics for all users or a specific user
+ * @param userId Optional user ID to reset data for a specific user only
+ */
+async function resetUserData(userId?: number) {
+  try {
+    // Initialize the database connection
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+      console.log("Database connection initialized");
+    }
+
+    const problemStateRepo = AppDataSource.getRepository(ProblemState);
+    const problemStatsRepo = AppDataSource.getRepository(ProblemStatistic);
+    
+    // Build the query conditions
+    const whereCondition = userId ? { userId } : {};
+    
+    // Delete problem states (weights)
+    const deleteWeightsResult = await problemStateRepo.delete(whereCondition);
+    console.log(`Deleted ${deleteWeightsResult.affected || 0} problem weights`);
+    
+    // Delete problem statistics
+    const deleteStatsResult = await problemStatsRepo.delete(userId ? { user_id: userId } : {});
+    console.log(`Deleted ${deleteStatsResult.affected || 0} problem statistics`);
+
+    // If we're resetting data for all users
+    if (!userId) {
+      console.log("All users' problem data has been reset");
+    } else {
+      // Get the user's name for the confirmation message
+      const user = await AppDataSource.getRepository(User).findOne({ 
+        where: { id: userId },
+        select: ['id', 'name']
+      });
+      console.log(`Problem data has been reset for user: ${user?.name || 'Unknown'} (ID: ${userId})`);
+    }
+    
+    console.log("Reset complete!");
+  } catch (error) {
+    console.error("Error resetting data:", error);
+  } finally {
+    // Close the database connection
+    if (AppDataSource.isInitialized) {
+      await AppDataSource.destroy();
+      console.log("Database connection closed");
+    }
+  }
+}
+
+// Handle command-line arguments
+async function main() {
+  const args = process.argv.slice(2);
+  
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log("Usage: npm run reset-weights [-- --user <userId>]");
+    console.log("");
+    console.log("Options:");
+    console.log("  --user <userId>  Reset data for a specific user only");
+    console.log("  --help, -h       Show this help message");
+    process.exit(0);
+  }
+  
+  const userIdIndex = args.indexOf("--user");
+  if (userIdIndex >= 0 && userIdIndex < args.length - 1) {
+    const userId = parseInt(args[userIdIndex + 1], 10);
+    if (isNaN(userId)) {
+      console.error("Error: User ID must be a number");
+      process.exit(1);
+    }
+    await resetUserData(userId);
+  } else {
+    // Confirm before wiping all data
+    if (args.includes("--force") || await confirmAction("Are you sure you want to reset ALL users' problem data? This action cannot be undone.")) {
+      await resetUserData();
+    } else {
+      console.log("Reset canceled.");
+    }
+  }
+}
+
+// Helper function to prompt for confirmation
+async function confirmAction(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    // Use dynamic import for Node.js readline (ESM compatible)
+    import('readline').then(readlineModule => {
+      const readline = readlineModule.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      readline.question(`${message} (y/N): `, (answer: string) => {
+        readline.close();
+        resolve(answer.toLowerCase() === 'y');
+      });
+    });
+  });
+}
+
+// Run the script
+main().catch(error => {
+  console.error("Unhandled error:", error);
+  process.exit(1);
+});
+
+================
+File: src/services/problemSelection/__tests__/selection.test.ts
+================
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { ProblemSelector } from '../selection';
+import { Problem, ProblemHistory, ProblemSelectionConfig, ProblemStateStorage, NormalizedProblem } from '../types';
+
+// Mock storage implementation for testing
+class MockStorage implements ProblemStateStorage {
+  private states = new Map<string, { weight: number; lastSeen: number }>();
+
+  private getKey(userId: number, normalized: NormalizedProblem): string {
+    return `${userId}-${normalized.smaller}x${normalized.larger}`;
+  }
+
+  getProblemState(userId: number, normalized: NormalizedProblem) {
+    const key = this.getKey(userId, normalized);
+    if (!this.states.has(key)) {
+      this.states.set(key, {
+        weight: normalized.smaller * normalized.larger,
+        lastSeen: 0
+      });
+    }
+    return this.states.get(key)!;
+  }
+
+  updateProblemState(userId: number, normalized: NormalizedProblem, state: { weight: number; lastSeen: number }) {
+    const key = this.getKey(userId, normalized);
+    this.states.set(key, state);
+  }
+
+  // Helper method for testing
+  getAllStates() {
+    return this.states;
+  }
+}
+
+describe('Problem Selection System', () => {
+  let selector: ProblemSelector;
+  let storage: MockStorage;
+  let testConfig: ProblemSelectionConfig;
+  let mockRandom: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    testConfig = {
+      minFactor: 2,
+      maxFactor: 5, // Using smaller range for tests
+      recentProblemCount: 3,
+      targetResponseTime: 5000,
+      weightIncreaseWrong: 5,
+      weightDecreaseFast: 3,
+      weightDecreaseSlow: 1
+    };
+    storage = new MockStorage();
+    selector = new ProblemSelector(storage);
+    mockRandom = jest.spyOn(Math, 'random');
+  });
+
+  afterEach(() => {
+    mockRandom.mockRestore();
+  });
+
+  describe('Problem Normalization', () => {
+    it('should treat reversed factors as the same problem for weight updates', () => {
+      const userId = 1;
+      const problem1: Problem = { factor1: 3, factor2: 4 };
+      
+      // Update weight for the problem
+      selector.updateProblemAfterAttempt(userId, problem1, false, 3000, testConfig);
+      
+      // Get state for problem2 - should have the same updated weight
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      
+      expect(state.weight).toBe(17); // 12 + 5 (weightIncreaseWrong)
+    });
+
+    it('should randomize factor order in selected problems', () => {
+      const history: ProblemHistory[] = [];
+      
+      // Force random to return 0 (smaller first)
+      mockRandom.mockReturnValueOnce(0);
+      const selected1 = selector.selectNextProblem(1, history, testConfig);
+      expect(selected1.factor1).toBeLessThanOrEqual(selected1.factor2);
+      
+      // Force random to return 0.9 (larger first)
+      mockRandom.mockReturnValueOnce(0.9);
+      const selected2 = selector.selectNextProblem(1, history, testConfig);
+      expect(selected2.factor1).toBeGreaterThanOrEqual(selected2.factor2);
+    });
+  });
+
+  describe('Problem Weight Updates', () => {
+    const userId = 1;
+    const problem: Problem = { factor1: 3, factor2: 4 };
+
+    it('should increase weight for wrong answers', () => {
+      selector.updateProblemAfterAttempt(userId, problem, false, 3000, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(17); // 12 + 5 (weightIncreaseWrong)
+    });
+
+    it('should decrease weight more for fast correct answers', () => {
+      selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(9); // 12 - 3 (weightDecreaseFast)
+    });
+
+    it('should decrease weight less for slow correct answers', () => {
+      selector.updateProblemAfterAttempt(userId, problem, true, 6000, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(11); // 12 - 1 (weightDecreaseSlow)
+    });
+
+    it('should not let weight go below 1', () => {
+      // Multiple fast correct answers
+      for (let i = 0; i < 5; i++) {
+        selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
+      }
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(1);
+    });
+  });
+
+  describe('Problem Selection', () => {
+    const userId = 1;
+
+    it('should select problem with highest weight when no history', () => {
+      const history: ProblemHistory[] = [];
+      mockRandom.mockReturnValue(0); // Force consistent order for test
+      const selected = selector.selectNextProblem(userId, history, testConfig);
+      
+      // With factors 2-5, 5x5=25 should be the highest initial weight
+      expect(Math.max(selected.factor1, selected.factor2)).toBe(5);
+      expect(Math.min(selected.factor1, selected.factor2)).toBe(5);
+    });
+
+    it('should not select recently seen problems in either order', () => {
+      const history: ProblemHistory[] = [
+        {
+          factor1: 5,
+          factor2: 4,
+          correct: true,
+          timeToAnswer: 3000,
+          timestamp: Date.now()
+        }
+      ];
+      
+      const selected = selector.selectNextProblem(userId, history, testConfig);
+      
+      // Should not select 5x4 or 4x5
+      expect(selected).not.toEqual({ factor1: 5, factor2: 4 });
+      expect(selected).not.toEqual({ factor1: 4, factor2: 5 });
+    });
+  });
+
+  describe('Per-User Problem States', () => {
+    it('should maintain separate weights for different users', () => {
+      const problem: Problem = { factor1: 3, factor2: 4 };
+      const normalized = { smaller: 3, larger: 4 };
+      
+      // User 1 gets it wrong
+      selector.updateProblemAfterAttempt(1, problem, false, 3000, testConfig);
+      
+      // User 2 gets it right quickly
+      selector.updateProblemAfterAttempt(2, problem, true, 3000, testConfig);
+      
+      const user1State = storage.getProblemState(1, normalized);
+      const user2State = storage.getProblemState(2, normalized);
+      
+      expect(user1State.weight).toBe(17); // Increased for wrong answer
+      expect(user2State.weight).toBe(9);  // Decreased for fast correct answer
+    });
+  });
+});
+
+================
+File: src/services/problemSelection/selection.ts
+================
+import { Problem, ProblemHistory, ProblemSelectionConfig, DEFAULT_CONFIG, ProblemStateStorage, NormalizedProblem, ProblemState } from './types';
+import { SQLiteProblemStateStorage } from './sqliteStorage';
+
+export class ProblemSelector {
+  protected storage: ProblemStateStorage;
+
+  constructor(storage?: ProblemStateStorage) {
+    this.storage = storage || new SQLiteProblemStateStorage();
+  }
+
+  /**
+   * Normalizes a problem by ensuring smaller factor comes first.
+   * This ensures that commutative pairs (e.g., 3×4 and 4×3) are treated as the same problem.
+   * 
+   * @param problem Problem to normalize
+   * @returns Normalized problem with smaller factor first
+   */
+  private normalizeProblem(problem: Problem): NormalizedProblem {
+    return {
+      smaller: Math.min(problem.factor1, problem.factor2),
+      larger: Math.max(problem.factor1, problem.factor2)
+    };
+  }
+
+  /**
+   * Converts a normalized problem back to regular problem with randomized factor order.
+   * This ensures that users see both orders of factors even though we treat them as the same problem.
+   * 
+   * @param normalized Normalized problem
+   * @returns Problem with randomized factor order
+   */
+  private denormalizeProblem(normalized: NormalizedProblem): Problem {
+    // Randomly decide factor order
+    return Math.random() < 0.5
+      ? { factor1: normalized.smaller, factor2: normalized.larger }
+      : { factor1: normalized.larger, factor2: normalized.smaller };
+  }
+
+  /**
+   * Generates all possible unique problems within the configured range.
+   * Uses normalization to avoid duplicate commutative pairs.
+   * 
+   * @param config Configuration parameters
+   * @returns Array of all possible normalized problems
+   */
+  private generateAllProblems(config: ProblemSelectionConfig = DEFAULT_CONFIG): NormalizedProblem[] {
+    const problems: NormalizedProblem[] = [];
+    for (let i = config.minFactor; i <= config.maxFactor; i++) {
+      for (let j = i; j <= config.maxFactor; j++) {  // Start from i to avoid duplicates
+        problems.push({ smaller: i, larger: j });
+      }
+    }
+    return problems;
+  }
+
+/**
+   * Selects the next problem to present to the user based on weights and history
+   * 
+   * @param userId User's ID
+   * @param history User's problem history
+   * @param config Configuration parameters
+   * @returns Selected problem with randomized factor order
+   */
+async selectNextProblem(
+  userId: number,
+  history: ProblemHistory[],
+  config: ProblemSelectionConfig = DEFAULT_CONFIG
+): Promise<Problem> {
+  console.log(`\nSelecting next problem for user ${userId}:`);
+  console.log(`Config: recentProblemCount=${config.recentProblemCount}, minFactor=${config.minFactor}, maxFactor=${config.maxFactor}`);
+  
+  // Generate all possible problems
+  const allProblems = this.generateAllProblems(config);
+  console.log(`Total possible problems: ${allProblems.length}`);
+  
+  // Get recent problems, sorted by timestamp (newest first)
+  const recentHistory = [...history].sort((a, b) => b.timestamp - a.timestamp);
+  
+  // Convert history to normalized form for comparison
+  const recentNormalized = recentHistory
+    .slice(0, config.recentProblemCount)
+    .map(h => this.normalizeProblem(h));
+  
+  console.log(`Recent history count: ${recentHistory.length}`);
+  console.log(`Problems to exclude: ${Math.min(recentNormalized.length, config.recentProblemCount)}`);
+  
+  if (recentNormalized.length > 0) {
+    console.log('Most recent problems:');
+    recentNormalized.slice(0, 5).forEach((p, i) => {
+      console.log(`  ${i+1}. ${p.smaller}×${p.larger} (${recentHistory[i].timestamp})`);
+    });
+  }
+  
+  // Filter out recently seen problems
+  const availableProblems = allProblems.filter(p => 
+    !recentNormalized.some(r => 
+      r.smaller === p.smaller && r.larger === p.larger
+    )
+  );
+  
+  console.log(`Available problems after filtering: ${availableProblems.length}`);
+  
+  // Use a graduated fallback approach if we have few available problems
+  const MIN_AVAILABLE_THRESHOLD = 3;
+  let problemPool = availableProblems;
+  
+  if (availableProblems.length < MIN_AVAILABLE_THRESHOLD) {
+    // If we have too few available problems, we'll use a more relaxed selection strategy
+    if (availableProblems.length === 0) {
+      console.log('No available problems after filtering recent history. Using full problem set.');
+      problemPool = allProblems;
+    } else {
+      console.log(`Only ${availableProblems.length} problems available, but proceeding with limited selection.`);
+    }
+  }
+  
+  // Get problem weights for the pool
+  const problemWeights: { problem: NormalizedProblem; weight: number }[] = [];
+  for (const problem of problemPool) {
+    const state = await this.storage.getProblemState(userId, problem);
+    problemWeights.push({
+      problem,
+      weight: state.weight
+    });
+  }
+  
+  // Sort problems by weight (highest first)
+  problemWeights.sort((a, b) => b.weight - a.weight);
+  
+  // Log top 5 highest weight problems
+  console.log('Top weighted problems:');
+  problemWeights.slice(0, 5).forEach((pw, i) => {
+    console.log(`  ${i+1}. ${pw.problem.smaller}×${pw.problem.larger} (weight: ${pw.weight.toFixed(2)})`);
+  });
+  
+  // Select the problem with highest weight
+  const selected = problemWeights[0].problem;
+  console.log(`Selected problem: ${selected.smaller}×${selected.larger} (weight: ${problemWeights[0].weight.toFixed(2)})`);
+  
+  // Return the selected problem in randomized factor order
+  return this.denormalizeProblem(selected);
+}
+
+async updateProblemAfterAttempt(
+  userId: number,
+  problem: Problem,
+  correct: boolean,
+  timeToAnswer: number,
+  config: ProblemSelectionConfig = DEFAULT_CONFIG
+): Promise<void> {
+  // Normalize problem to ensure consistent storage regardless of factor order
+  const normalized = this.normalizeProblem(problem);
+  const state = await this.storage.getProblemState(userId, normalized);
+  
+  // Update weight based on performance
+  let newWeight = state.weight;
+  let adjustmentReason = '';
+  
+  if (!correct) {
+    // Incorrect answer: increase weight
+    newWeight += config.weightIncreaseWrong;
+    adjustmentReason = `incorrect answer (+${config.weightIncreaseWrong})`;
+  } else if (timeToAnswer < config.targetResponseTime) {
+    // Fast correct answer: decrease weight more
+    newWeight -= config.weightDecreaseFast;
+    adjustmentReason = `fast correct answer (-${config.weightDecreaseFast})`;
+  } else {
+    // Slow correct answer: decrease weight less
+    newWeight -= config.weightDecreaseSlow;
+    adjustmentReason = `slow correct answer (-${config.weightDecreaseSlow})`;
+  }
+
+  // Ensure weight doesn't go below 1
+  const wasClipped = newWeight < 1;
+  newWeight = Math.max(1, newWeight);
+
+  // Update state with new weight and timestamp
+  await this.storage.updateProblemState(userId, normalized, {
+    weight: newWeight,
+    lastSeen: Date.now()
+  });
+
+  // Enhanced logging for debugging
+  console.log(`Problem ${normalized.smaller}x${normalized.larger} weight updated:`, {
+    userId,
+    oldWeight: state.weight,
+    newWeight,
+    weightChange: newWeight - state.weight,
+    correct,
+    timeToAnswer,
+    targetResponseTime: config.targetResponseTime,
+    adjustmentReason,
+    wasClipped: wasClipped ? 'Yes (minimum weight enforced)' : 'No'
+  });
+}
+
+  /**
+   * Gets the current state of a problem for a user, using normalization
+   * to ensure consistent state regardless of factor order.
+   * 
+   * @param userId User's ID
+   * @param problem Problem to get state for (could be in any order)
+   * @returns Current problem state
+   */
+  async getProblemState(userId: number, problem: Problem): Promise<ProblemState> {
+    const normalized = this.normalizeProblem(problem);
+    return await this.storage.getProblemState(userId, normalized);
+  }
+}
+
+export const problemSelector = new ProblemSelector();
+
+================
+File: src/services/problemSelection/sqliteStorage.ts
+================
+import { AppDataSource } from "../../config/database";
+import { NormalizedProblem, ProblemState as ProblemStateType, ProblemStateStorage } from "./types";
+import { ProblemState } from "../../models/ProblemState";
+
+export class SQLiteProblemStateStorage implements ProblemStateStorage {
+    async getProblemState(userId: number, normalized: NormalizedProblem): Promise<ProblemStateType> {
+        const repository = AppDataSource.getRepository(ProblemState);
+        
+        console.log(`\nGetting problem state for user ${userId}, factors: ${normalized.smaller}x${normalized.larger}`);
+        
+        try {
+            // Always store with smaller factor first for consistency
+            const state = await repository
+                .createQueryBuilder('state')
+                .where(
+                    'state.userId = :userId AND state.factor1 = :smaller AND state.factor2 = :larger',
+                    { 
+                        userId,
+                        smaller: normalized.smaller,
+                        larger: normalized.larger
+                    }
+                )
+                .getOne();
+
+            if (state) {
+                console.log('Found existing state:', state);
+                return {
+                    weight: state.weight,
+                    lastSeen: state.lastSeen
+                };
+            }
+
+            console.log('No existing state found, returning default');
+            
+            // FIXED: Use a constant default weight instead of factor product
+            // This ensures all problems start at the same difficulty level
+            const DEFAULT_WEIGHT = 10;
+            
+            // Return default state if none exists
+            return {
+                weight: DEFAULT_WEIGHT,
+                lastSeen: 0
+            };
+        } catch (error) {
+            console.error('Error getting problem state:', error);
+            throw error;
+        }
+    }
+
+    async updateProblemState(userId: number, normalized: NormalizedProblem, state: ProblemStateType): Promise<void> {
+        const repository = AppDataSource.getRepository(ProblemState);
+        
+        console.log(`\nUpdating problem state for user ${userId}, factors: ${normalized.smaller}x${normalized.larger}`);
+        console.log('New state:', state);
+        
+        try {
+            // Always query with smaller factor first for consistency
+            let problemState = await repository
+                .createQueryBuilder('state')
+                .where(
+                    'state.userId = :userId AND state.factor1 = :smaller AND state.factor2 = :larger',
+                    { 
+                        userId,
+                        smaller: normalized.smaller,
+                        larger: normalized.larger
+                    }
+                )
+                .getOne();
+
+            if (!problemState) {
+                console.log('Creating new problem state');
+                // Create new state if none exists
+                problemState = new ProblemState();
+                problemState.userId = userId;
+                // Always store with smaller factor first for consistency
+                problemState.factor1 = normalized.smaller;
+                problemState.factor2 = normalized.larger;
+            } else {
+                console.log('Updating existing problem state');
+            }
+
+            // Update state
+            problemState.weight = state.weight;
+            problemState.lastSeen = state.lastSeen;
+
+            // Save to database
+            const saved = await repository.save(problemState);
+            console.log('Saved problem state:', saved);
+        } catch (error) {
+            console.error('Error updating problem state:', error);
+            throw error;
+        }
+    }
+}
+
+================
+File: src/services/problemSelection/storage.ts
+================
+import { NormalizedProblem, ProblemState, ProblemStateStorage } from './types';
+
+export class InMemoryProblemStateStorage implements ProblemStateStorage {
+  private states: Map<string, ProblemState>;
+
+  constructor() {
+    this.states = new Map();
+  }
+
+  private getKey(userId: number, normalized: NormalizedProblem): string {
+    return `${userId}-${normalized.smaller}x${normalized.larger}`;
+  }
+
+  async getProblemState(userId: number, normalized: NormalizedProblem): Promise<ProblemState> {
+    const key = this.getKey(userId, normalized);
+    if (!this.states.has(key)) {
+      // Initialize with default weight of 10, consistent with SQLite implementation
+      this.states.set(key, {
+        weight: 10,
+        lastSeen: 0
+      });
+    }
+    return this.states.get(key)!;
+  }
+
+  async updateProblemState(userId: number, normalized: NormalizedProblem, state: ProblemState): Promise<void> {
+    const key = this.getKey(userId, normalized);
+    this.states.set(key, state);
+  }
+}
+
+================
+File: src/services/problemSelection/types.ts
+================
+/**
+ * Core types for the problem selection system
+ */
+
+export interface Problem {
+  factor1: number;
+  factor2: number;
+}
+
+export interface NormalizedProblem {
+  smaller: number;
+  larger: number;
+}
+
+export interface ProblemHistory {
+  factor1: number;
+  factor2: number;
+  correct: boolean;
+  timeToAnswer: number;
+  timestamp: number;
+}
+
+export interface ProblemState {
+  weight: number;
+  lastSeen: number;
+}
+
+export interface ProblemStateStorage {
+  getProblemState(userId: number, normalized: NormalizedProblem): Promise<ProblemState>;
+  updateProblemState(userId: number, normalized: NormalizedProblem, state: ProblemState): Promise<void>;
+}
+
+export interface ProblemSelectionConfig {
+  // Factor Range
+  minFactor: number;
+  maxFactor: number;
+
+  // Problem Selection
+  recentProblemCount: number;     // How many recent problems to exclude
+  targetResponseTime: number;      // Target time to solve problem (ms)
+  
+  // Weight Adjustments
+  weightIncreaseWrong: number;    // W: Weight increase for wrong answer
+  weightDecreaseFast: number;     // X: Weight decrease for fast correct answer
+  weightDecreaseSlow: number;     // Z: Weight decrease for slow correct answer
+}
+
+// Optimize weight adjustments for better differentiation
+export const DEFAULT_CONFIG: ProblemSelectionConfig = {
+  minFactor: 2,
+  maxFactor: 10,
+  
+  recentProblemCount: 20,
+  targetResponseTime: 5000,       // 5 seconds
+  
+  weightIncreaseWrong: 7,         // Increase weight significantly for wrong answers
+  weightDecreaseFast: 3,          // Moderate decrease for fast correct answers 
+  weightDecreaseSlow: 1           // Small decrease for slow correct answers
+};
+
+================
+File: src/app.ts
+================
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+import { json } from "body-parser";
+import dotenv from "dotenv";
+import usersRoutes from "./routes/users.routes";
+import sessionsRoutes from "./routes/sessions.routes";
+
+// Load environment variables
+dotenv.config();
+
+// Create Express app
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(json());
+
+// Request logging middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// Routes
+app.use("/api/users", usersRoutes);
+app.use("/api/sessions", sessionsRoutes);
+
+// Health check endpoint
+app.get("/health", (_: Request, res: Response) => {
+  res.status(200).json({ status: "ok" });
+});
+
+// Error handling middleware
+app.use((err: Error, _req: Request, res: Response) => {
+  console.error(err.stack);
+  res.status(500).json({
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "An unexpected error occurred",
+    }
+  });
+});
+
+export default app;
+
+================
+File: src/server.ts
+================
+import app from "./app";
+import { AppDataSource } from "./config/database";
+import { User } from "./models/User";
+
+const PORT = process.env.PORT || 3001;
+
+// Initialize database and start server
+async function startServer() {
+  try {
+    // Initialize database connection
+    await AppDataSource.initialize();
+    console.log("Database connection initialized");
+
+    // Run migrations
+    await AppDataSource.runMigrations();
+    console.log("Database migrations completed");
+
+    // Create a test user if none exists
+    const userRepo = AppDataSource.getRepository(User);
+    const userCount = await userRepo.count();
+    if (userCount === 0) {
+      await userRepo.save({
+        name: 'Test User',
+        is_parent: false,
+        current_level: 1
+      });
+      console.log("Created test user");
+    }
+
+    // Start the server
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Error during startup:", error);
+    process.exit(1);
+  }
+}
+
+// Handle shutdown gracefully
+process.on('SIGINT', async () => {
+  try {
+    await AppDataSource.destroy();
+    console.log('Database connection closed');
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+});
+
+startServer();
+
+================
+File: .dockerignore
+================
+# Version control
+.git
+.gitignore
+
+# Dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment
+.env
+.env.*
+
+# Build output
+dist
+build
+coverage
+
+# Development
+*.test.ts
+*.spec.ts
+__tests__
+__mocks__
+*.md
+*.log
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Data
+data/*
+
+================
+File: docker-compose.yml
+================
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+    command: npm run dev
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  data:
+
+================
+File: Dockerfile
+================
+# Build stage
+FROM node:20-alpine as builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm ci --only=production
+
+# Copy built application from builder stage
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src/migrations ./src/migrations
+
+# Create data directory for SQLite
+RUN mkdir -p data
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PORT=3001
+
+# Expose port
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+# Start the application
+CMD ["node", "dist/server.js"]
+
+================
+File: package.json
+================
+{
+  "name": "math-practice-backend",
+  "version": "1.0.0",
+  "description": "Backend server for math practice application",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "build": "tsc",
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration:generate": "npm run typeorm migration:generate",
+    "migration:run": "npm run typeorm migration:run",
+    "migration:revert": "npm run typeorm migration:revert",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "setupFiles": [
+      "dotenv/config"
+    ]
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.5",
+    "@types/cors": "^2.8.17",
+    "@types/dotenv": "^8.2.3",
+    "@types/express": "^5.0.0",
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.9",
+    "ts-jest": "^29.2.6",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.3",
+    "sqlite3": "^5.1.7",
+    "typeorm": "^0.3.20"
+  }
+}
+
+================
+File: tsconfig.json
+================
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "strictPropertyInitialization": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "**/*.test.ts"]
+}
+
+================
+File: typeorm.config.ts
+================
+import { AppDataSource } from "./src/config/database";
+
+export default AppDataSource;
+
+
+
+================================================================
+End of Codebase
+================================================================

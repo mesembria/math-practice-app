@@ -1,0 +1,4663 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: **/*.test.tsx
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+
+Additional Info:
+----------------
+
+================================================================
+Directory Structure
+================================================================
+.github/
+  workflows/
+    docker-build.yml
+backend/
+  src/
+    config/
+      database.ts
+    controllers/
+      sessions.controller.ts
+      users.controller.ts
+    migrations/
+      1708642583000-InitialSchema.ts
+      1708642584000-AddUserLevel.ts
+      1708642585000-AddProblemStates.ts
+    models/
+      ExerciseSession.ts
+      index.ts
+      ProblemAttempt.ts
+      ProblemState.ts
+      ProblemStatistic.ts
+      types.ts
+      User.ts
+    routes/
+      sessions.routes.ts
+      users.routes.ts
+    scripts/
+      resetWeights.ts
+    services/
+      problemSelection/
+        __tests__/
+          selection.test.ts
+        selection.ts
+        sqliteStorage.ts
+        storage.ts
+        types.ts
+    app.ts
+    server.ts
+  .dockerignore
+  .env
+  docker-compose.yml
+  Dockerfile
+  package.json
+  tsconfig.json
+  typeorm.config.ts
+public/
+  vite.svg
+src/
+  assets/
+    react.svg
+  components/
+    Exercise/
+      hooks/
+        useExercise.ts
+      CompletionMessage.tsx
+      component-export.ts
+      ErrorView.tsx
+      Exercise.tsx
+      ExerciseView.tsx
+      LoadingView.tsx
+      PauseOverlay.tsx
+      ProgressStats.tsx
+      SmallComponents.tsx
+      types.ts
+    LandingPage/
+      LandingPage.tsx
+    NumericKeyboard/
+      NumericKeyboard.tsx
+    ProblemDisplay/
+      ProblemDisplay.tsx
+    ProgressIndicator/
+      ProgressIndicator.tsx
+    SessionSummary/
+      utils/
+        calculations.ts
+        formatters.ts
+      MasteryGrid.tsx
+      PerformanceInsights.tsx
+      ProblemList.tsx
+      SessionSummary.tsx
+      StatsSummary.tsx
+  context/
+    ExerciseContext/
+      ExerciseContext.tsx
+      types.ts
+      useExercise.ts
+  services/
+    api.ts
+  test/
+    setup.ts
+  types/
+    index.ts
+  App.css
+  App.tsx
+  index.css
+  main.tsx
+  vite-env.d.ts
+.dockerignore
+.gitignore
+Dockerfile
+eslint.config.js
+index.html
+package.json
+README.md
+tsconfig.app.json
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+
+================================================================
+Files
+================================================================
+
+================
+File: .github/workflows/docker-build.yml
+================
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/math-practice-app:latest
+            ghcr.io/${{ github.repository_owner }}/math-practice-app:${{ github.sha }}
+
+================
+File: backend/src/config/database.ts
+================
+import { DataSource } from "typeorm";
+import path from "path";
+import fs from "fs";
+import { User } from "../models/User";
+import { ExerciseSession } from "../models/ExerciseSession";
+import { ProblemAttempt } from "../models/ProblemAttempt";
+import { ProblemStatistic } from "../models/ProblemStatistic";
+import { ProblemState } from "../models/ProblemState";
+
+export const AppDataSource = new DataSource({
+  type: "sqlite",
+  database: process.env.NODE_ENV === "test" 
+    ? ":memory:" 
+    : path.join(__dirname, "../../data/math-practice.sqlite"),
+  entities: [
+    User,
+    ExerciseSession,
+    ProblemAttempt,
+    ProblemStatistic,
+    ProblemState
+  ],
+  synchronize: process.env.NODE_ENV === "development",
+  logging: process.env.NODE_ENV === "development",
+  migrations: [path.join(__dirname, "../migrations/*.ts")],
+});
+
+// Create data directory if it doesn't exist
+if (process.env.NODE_ENV !== "test") {
+  const dataDir = path.join(__dirname, "../../data");
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+}
+
+================
+File: backend/src/controllers/sessions.controller.ts
+================
+import { RequestHandler } from 'express';
+import { AppDataSource } from '../config/database';
+import { ExerciseSession } from '../models/ExerciseSession';
+import { ProblemAttempt } from '../models/ProblemAttempt';
+import { ProblemStatistic } from '../models/ProblemStatistic';
+import { User } from '../models/User';
+import { problemSelector } from '../services/problemSelection/selection';
+import { ProblemHistory, DEFAULT_CONFIG } from '../services/problemSelection/types';
+
+export class SessionsController {
+  static create: RequestHandler = async (req, res) => {
+    try {
+      const { userId, totalProblems } = req.body;
+
+      if (!userId || !totalProblems) {
+        res.status(400).json({ error: 'userId and totalProblems are required' });
+        return;
+      }
+
+      const userRepository = AppDataSource.getRepository(User);
+      const user = await userRepository.findOne({ where: { id: userId } });
+
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const session = sessionRepository.create({
+        user_id: userId,
+        total_problems: totalProblems,
+        completed_problems: 0,
+        is_completed: false
+      });
+
+      await sessionRepository.save(session);
+      res.status(201).json(session);
+    } catch (error) {
+      console.error('Error creating session:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // Enhanced problem selection logic
+  static getNextProblem: RequestHandler = async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const session = await sessionRepository.findOne({ 
+        where: { id: parseInt(sessionId) },
+        relations: ['attempts', 'user']
+      });
+
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      if (session.is_completed || session.completed_problems >= session.total_problems) {
+        res.status(400).json({ error: 'Session is completed' });
+        return;
+      }
+
+      console.log(`\n[getNextProblem] Selecting problem for user ${session.user_id}, session ${sessionId}`);
+      console.log(`[getNextProblem] Progress: ${session.completed_problems}/${session.total_problems} problems`);
+
+      // Get user's problem history - include more history for better pattern detection
+      const problemRepository = AppDataSource.getRepository(ProblemAttempt);
+      const userAttempts = await problemRepository
+        .createQueryBuilder('attempt')
+        .innerJoin('attempt.session', 'session')
+        .where('session.user_id = :userId', { userId: session.user_id })
+        .orderBy('attempt.created_at', 'DESC')
+        .limit(50) // Get more history for better analysis
+        .getMany();
+
+      // Convert attempts to ProblemHistory format
+      const history: ProblemHistory[] = userAttempts.map(attempt => ({
+        factor1: attempt.factor1,
+        factor2: attempt.factor2,
+        correct: attempt.is_correct || false,
+        timeToAnswer: attempt.response_time_ms || 0,
+        timestamp: attempt.created_at.getTime()
+      }));
+
+      console.log(`[getNextProblem] Analyzed ${history.length} recent attempts`);
+
+      // Use default configuration for problem selection
+      const config = { ...DEFAULT_CONFIG };
+      console.log(`[getNextProblem] Using default factor range: ${config.minFactor}-${config.maxFactor}`);
+      
+      // Note: Not using user level as it appears to be an unused feature
+
+      // Select next problem using enhanced weight-based selection
+      const nextProblem = await problemSelector.selectNextProblem(session.user_id, history, config);
+      
+      console.log(`[getNextProblem] Selected problem: ${nextProblem.factor1} × ${nextProblem.factor2}`);
+
+      // Create and save the problem
+      const problem = problemRepository.create({
+        session_id: session.id,
+        factor1: nextProblem.factor1,
+        factor2: nextProblem.factor2,
+        attempt_number: 1
+      });
+
+      await problemRepository.save(problem);
+
+      res.json({
+        problemId: problem.id,
+        factor1: problem.factor1,
+        factor2: problem.factor2
+      });
+    } catch (error) {
+      console.error('Error getting next problem:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  static getSession: RequestHandler = async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const session = await sessionRepository.findOne({ 
+        where: { id: parseInt(sessionId) }
+      });
+
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      res.json(session);
+    } catch (error) {
+      console.error('Error getting session:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  // Enhanced attempt submission and data gathering
+  static submitAttempt: RequestHandler = async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const { problemId, answer, responseTimeMs } = req.body;
+
+      if (!problemId || answer === undefined || !responseTimeMs) {
+        res.status(400).json({ error: 'problemId, answer, and responseTimeMs are required' });
+        return;
+      }
+
+      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      const problemRepository = AppDataSource.getRepository(ProblemAttempt);
+      const statisticsRepository = AppDataSource.getRepository(ProblemStatistic);
+
+      const [session, problem] = await Promise.all([
+        sessionRepository.findOne({ 
+          where: { id: parseInt(sessionId) },
+          relations: ['user']
+        }),
+        problemRepository.findOne({ where: { id: problemId } })
+      ]);
+
+      if (!session || !problem) {
+        res.status(404).json({ error: 'Session or problem not found' });
+        return;
+      }
+
+      if (session.is_completed) {
+        res.status(400).json({ error: 'Session is already completed' });
+        return;
+      }
+
+      console.log(`\n[submitAttempt] Processing attempt for problem ${problem.factor1} × ${problem.factor2}`);
+      console.log(`[submitAttempt] User answer: ${answer}, Response time: ${responseTimeMs}ms`);
+
+      // Update problem attempt
+      const correctAnswer = problem.factor1 * problem.factor2;
+      const isCorrect = correctAnswer === answer;
+      problem.user_answer = answer;
+      problem.is_correct = isCorrect;
+      problem.response_time_ms = responseTimeMs;
+      await problemRepository.save(problem);
+
+      console.log(`[submitAttempt] Answer is ${isCorrect ? 'correct' : 'incorrect'}`);
+
+      // Update or create problem statistics for this combination
+      let statistic = await statisticsRepository.findOne({
+        where: {
+          user_id: session.user_id,
+          factor1: Math.min(problem.factor1, problem.factor2),
+          factor2: Math.max(problem.factor1, problem.factor2)
+        }
+      });
+
+      if (!statistic) {
+        statistic = statisticsRepository.create({
+          user_id: session.user_id,
+          factor1: Math.min(problem.factor1, problem.factor2),
+          factor2: Math.max(problem.factor1, problem.factor2),
+          total_attempts: 0,
+          correct_attempts: 0,
+          avg_response_time_ms: 0
+        });
+      }
+
+      // Update statistics (normalized with smaller factor first for consistency)
+      statistic.total_attempts += 1;
+      if (isCorrect) {
+        statistic.correct_attempts += 1;
+      }
+      
+      // Update average response time using weighted average
+      statistic.avg_response_time_ms = 
+        (statistic.avg_response_time_ms * (statistic.total_attempts - 1) + responseTimeMs) / 
+        statistic.total_attempts;
+      
+      await statisticsRepository.save(statistic);
+
+      // Update problem weights based on performance
+      await problemSelector.updateProblemAfterAttempt(
+        session.user_id,
+        { factor1: problem.factor1, factor2: problem.factor2 },
+        isCorrect,
+        responseTimeMs
+      );
+
+      // Update session progress
+      session.completed_problems += 1;
+      if (session.completed_problems >= session.total_problems) {
+        session.is_completed = true;
+        session.end_time = new Date();
+        
+        // Note: Not updating user level as it appears to be an unused feature
+      }
+      await sessionRepository.save(session);
+
+      // If session is complete, gather all session data with enhanced details
+      if (session.is_completed) {
+        console.log(`[submitAttempt] Session ${sessionId} is now complete!`);
+        
+        // Get all completed attempts for this session
+        const sessionAttempts = await problemRepository
+          .createQueryBuilder('attempt')
+          .where('attempt.session_id = :sessionId', { sessionId: session.id })
+          .andWhere('attempt.user_answer IS NOT NULL')
+          .orderBy('attempt.created_at', 'ASC')
+          .getMany();
+
+        console.log(`[submitAttempt] Got ${sessionAttempts.length} attempts for this session`);
+
+      // Get average response times for each problem combination
+      const avgResponseTimes = await problemRepository
+        .createQueryBuilder('attempt')
+        .innerJoin('attempt.session', 'session')
+        .select('attempt.factor1', 'factor1')
+        .addSelect('attempt.factor2', 'factor2')
+        .addSelect('AVG(attempt.response_time_ms)', 'avgTime')
+        .where('session.user_id = :userId', { userId: session.user_id })
+        .andWhere('attempt.response_time_ms IS NOT NULL')
+        .andWhere('attempt.is_correct = 1')
+        .groupBy('attempt.factor1')
+        .addGroupBy('attempt.factor2')
+        .getRawMany();
+
+      // Normalize factors after retrieving data
+      const avgTimeMap = new Map(
+        avgResponseTimes.map(avg => {
+          const smaller = Math.min(avg.factor1, avg.factor2);
+          const larger = Math.max(avg.factor1, avg.factor2);
+          return [
+            `${smaller}x${larger}`,
+            parseFloat(avg.avgTime)
+          ];
+        })
+      );
+
+        console.log(`[submitAttempt] Gathered avg response times for ${avgTimeMap.size} problem combinations`);
+
+        // Get all problem weights for this user
+        const allWeights: { factor1: number; factor2: number; weight: number }[] = [];
+        console.log('\n[submitAttempt] Fetching problem weights for user:', session.user_id);
+        
+        // Only fetch weights for problem combinations in the valid range
+        const config = DEFAULT_CONFIG;
+        for (let i = config.minFactor; i <= config.maxFactor; i++) {
+          for (let j = i; j <= config.maxFactor; j++) {
+            // The getProblemState method expects a Problem object with factor1 and factor2
+            const state = await problemSelector.getProblemState(session.user_id, { factor1: i, factor2: j });
+            
+            // Add weights for both factor orderings for easier display in frontend
+            allWeights.push({
+              factor1: i,
+              factor2: j,
+              weight: state.weight
+            });
+            
+            // Skip adding duplicate for equal factors
+            if (i !== j) {
+              allWeights.push({
+                factor1: j,
+                factor2: i,
+                weight: state.weight
+              });
+            }
+          }
+        }
+        
+        console.log(`[submitAttempt] Total weights collected: ${allWeights.length}`);
+
+        // Calculate session statistics
+        const totalCorrect = sessionAttempts.filter(a => a.is_correct).length;
+        const accuracy = (totalCorrect / sessionAttempts.length) * 100;
+        const avgTime = sessionAttempts.reduce((sum, a) => sum + (a.response_time_ms || 0), 0) / sessionAttempts.length;
+
+        console.log(`[submitAttempt] Session stats: Accuracy: ${accuracy.toFixed(1)}%, Avg Time: ${avgTime.toFixed(0)}ms`);
+
+        res.json({
+          isCorrect,
+          correctAnswer,
+          isSessionComplete: true,
+          sessionSummary: {
+            attempts: sessionAttempts.map(attempt => {
+              // Get average time for this problem combination (using normalized key)
+              const normalizedFactors = [attempt.factor1, attempt.factor2].sort((a, b) => a - b);
+              const avgTimeKey = `${normalizedFactors[0]}x${normalizedFactors[1]}`;
+              
+              return {
+                factor1: attempt.factor1,
+                factor2: attempt.factor2,
+                isCorrect: attempt.is_correct,
+                responseTime: attempt.response_time_ms,
+                averageTime: avgTimeMap.get(avgTimeKey) || null,
+                userAnswer: attempt.user_answer
+              };
+            }),
+            problemWeights: allWeights,
+            sessionStats: {
+              totalProblems: session.total_problems,
+              correctAnswers: totalCorrect,
+              accuracy: accuracy,
+              averageResponseTime: avgTime,
+              completedAt: session.end_time
+            }
+          }
+        });
+      } else {
+        res.json({
+          isCorrect,
+          correctAnswer,
+          isSessionComplete: false
+        });
+      }
+    } catch (error) {
+      console.error('Error submitting attempt:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+}
+
+// Note: User level functionality was removed as it appeared to be an unused artifact
+// The function was previously here to update user's level based on performance
+
+================
+File: backend/src/controllers/users.controller.ts
+================
+import { RequestHandler } from 'express';
+import { AppDataSource } from '../config/database';
+import { User } from '../models/User';
+
+export class UsersController {
+  static list: RequestHandler = async (req, res) => {
+    try {
+      const userRepository = AppDataSource.getRepository(User);
+      const users = await userRepository.find({
+        select: ['id', 'name', 'is_parent'], // Only return necessary fields
+        order: { name: 'ASC' } // Sort by name
+      });
+      
+      res.json(users);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+}
+
+================
+File: backend/src/migrations/1708642583000-InitialSchema.ts
+================
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class InitialSchema1708642583000 implements MigrationInterface {
+    name = 'InitialSchema1708642583000'
+
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
+            CREATE TABLE "users" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "name" TEXT NOT NULL,
+                "is_parent" BOOLEAN NOT NULL DEFAULT (0),
+                "created_at" DATETIME NOT NULL DEFAULT (datetime('now'))
+            )
+        `);
+
+        await queryRunner.query(`
+            CREATE TABLE "exercise_sessions" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "user_id" INTEGER NOT NULL,
+                "start_time" DATETIME NOT NULL DEFAULT (datetime('now')),
+                "end_time" DATETIME,
+                "total_problems" INTEGER NOT NULL,
+                "completed_problems" INTEGER DEFAULT (0),
+                "is_completed" BOOLEAN DEFAULT (0),
+                FOREIGN KEY ("user_id") REFERENCES "users" ("id")
+            )
+        `);
+
+        await queryRunner.query(`
+            CREATE TABLE "problem_attempts" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "session_id" INTEGER NOT NULL,
+                "factor1" INTEGER NOT NULL,
+                "factor2" INTEGER NOT NULL,
+                "user_answer" INTEGER,
+                "is_correct" BOOLEAN,
+                "response_time_ms" INTEGER,
+                "attempt_number" INTEGER DEFAULT (1),
+                "created_at" DATETIME NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY ("session_id") REFERENCES "exercise_sessions" ("id")
+            )
+        `);
+
+        await queryRunner.query(`
+            CREATE TABLE "problem_statistics" (
+                "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+                "user_id" INTEGER NOT NULL,
+                "factor1" INTEGER NOT NULL,
+                "factor2" INTEGER NOT NULL,
+                "total_attempts" INTEGER DEFAULT (0),
+                "correct_attempts" INTEGER DEFAULT (0),
+                "avg_response_time_ms" INTEGER DEFAULT (0),
+                "last_attempt_at" DATETIME NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY ("user_id") REFERENCES "users" ("id"),
+                UNIQUE("user_id", "factor1", "factor2")
+            )
+        `);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP TABLE "problem_statistics"`);
+        await queryRunner.query(`DROP TABLE "problem_attempts"`);
+        await queryRunner.query(`DROP TABLE "exercise_sessions"`);
+        await queryRunner.query(`DROP TABLE "users"`);
+    }
+}
+
+================
+File: backend/src/migrations/1708642584000-AddUserLevel.ts
+================
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class AddUserLevel1708642584000 implements MigrationInterface {
+    name = 'AddUserLevel1708642584000'
+
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
+            ALTER TABLE "users" 
+            ADD COLUMN "current_level" INTEGER NOT NULL DEFAULT (1)
+        `);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`
+            ALTER TABLE "users" 
+            DROP COLUMN "current_level"
+        `);
+    }
+}
+
+================
+File: backend/src/migrations/1708642585000-AddProblemStates.ts
+================
+import { MigrationInterface, QueryRunner, Table } from "typeorm";
+
+export class AddProblemStates1708642585000 implements MigrationInterface {
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.createTable(
+            new Table({
+                name: "problem_states",
+                columns: [
+                    {
+                        name: "id",
+                        type: "integer",
+                        isPrimary: true,
+                        isGenerated: true,
+                        generationStrategy: "increment"
+                    },
+                    {
+                        name: "user_id",
+                        type: "integer"
+                    },
+                    {
+                        name: "factor1",
+                        type: "integer",
+                        comment: "Always stores the smaller factor"
+                    },
+                    {
+                        name: "factor2",
+                        type: "integer",
+                        comment: "Always stores the larger factor"
+                    },
+                    {
+                        name: "weight",
+                        type: "float",
+                        default: 10 // Default weight for new problems
+                    },
+                    {
+                        name: "last_seen",
+                        type: "bigint",
+                        default: 0
+                    }
+                ],
+                indices: [
+                    {
+                        name: "IDX_problem_states_user_factors",
+                        columnNames: ["user_id", "factor1", "factor2"],
+                        isUnique: true
+                    }
+                ],
+                foreignKeys: [
+                    {
+                        columnNames: ["user_id"],
+                        referencedTableName: "users",
+                        referencedColumnNames: ["id"],
+                        onDelete: "CASCADE"
+                    }
+                ]
+            }),
+            true
+        );
+
+        // Add a trigger to ensure factor1 <= factor2 (SQLite syntax)
+        await queryRunner.query(`
+            CREATE TRIGGER IF NOT EXISTS ensure_factor_order
+            BEFORE INSERT ON problem_states
+            FOR EACH ROW
+            BEGIN
+                SELECT CASE
+                    WHEN NEW.factor1 > NEW.factor2 THEN
+                        RAISE(ABORT, 'factor1 must be less than or equal to factor2')
+                    END;
+            END;
+        `);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`DROP TRIGGER IF EXISTS ensure_factor_order`);
+        await queryRunner.dropTable("problem_states");
+    }
+}
+
+================
+File: backend/src/models/ExerciseSession.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, OneToMany, JoinColumn } from "typeorm";
+import { IExerciseSession, IUser, IProblemAttempt } from "./types";
+
+@Entity("exercise_sessions")
+export class ExerciseSession implements IExerciseSession {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  user_id: number;
+
+  @CreateDateColumn()
+  start_time: Date;
+
+  @Column({ nullable: true })
+  end_time: Date;
+
+  @Column()
+  total_problems: number;
+
+  @Column({ default: 0 })
+  completed_problems: number;
+
+  @Column({ default: false })
+  is_completed: boolean;
+
+  @ManyToOne("User", "sessions")
+  @JoinColumn({ name: "user_id" })
+  user: IUser;
+
+  @OneToMany("ProblemAttempt", "session")
+  attempts: IProblemAttempt[];
+}
+
+================
+File: backend/src/models/index.ts
+================
+export { User } from "./User";
+export { ExerciseSession } from "./ExerciseSession";
+export { ProblemAttempt } from "./ProblemAttempt";
+export { ProblemStatistic } from "./ProblemStatistic";
+export { ProblemState } from "./ProblemState";
+
+================
+File: backend/src/models/ProblemAttempt.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from "typeorm";
+import { IProblemAttempt, IExerciseSession } from "./types";
+
+@Entity("problem_attempts")
+export class ProblemAttempt implements IProblemAttempt {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  session_id: number;
+
+  @Column()
+  factor1: number;
+
+  @Column()
+  factor2: number;
+
+  @Column({ nullable: true })
+  user_answer: number;
+
+  @Column({ nullable: true })
+  is_correct: boolean;
+
+  @Column({ nullable: true })
+  response_time_ms: number;
+
+  @Column({ default: 1 })
+  attempt_number: number;
+
+  @CreateDateColumn()
+  created_at: Date;
+
+  @ManyToOne("ExerciseSession", "attempts")
+  @JoinColumn({ name: "session_id" })
+  session: IExerciseSession;
+}
+
+================
+File: backend/src/models/ProblemState.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, BeforeInsert, BeforeUpdate, Check } from "typeorm";
+import { User } from "./User";
+
+@Entity("problem_states")
+@Check(`"factor1" <= "factor2"`) // Enforces normalization at database level
+export class ProblemState {
+    @PrimaryGeneratedColumn()
+    id: number;
+
+    @Column({ name: "user_id" })
+    userId: number;
+
+    @Column()
+    factor1: number;
+
+    @Column()
+    factor2: number;
+
+    @Column({ type: "float", default: 10 })
+    weight: number;
+
+    @Column({ name: "last_seen", type: "bigint", default: 0 })
+    lastSeen: number;
+
+    @ManyToOne(() => User, { onDelete: "CASCADE" })
+    @JoinColumn({ name: "user_id" })
+    user: User;
+
+    // This will ensure normalization at the entity level
+    @BeforeInsert()
+    @BeforeUpdate()
+    ensureNormalization() {
+        if (this.factor1 > this.factor2) {
+            // Swap the factors to ensure factor1 <= factor2
+            [this.factor1, this.factor2] = [this.factor2, this.factor1];
+        }
+    }
+}
+
+================
+File: backend/src/models/ProblemStatistic.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, Unique, UpdateDateColumn } from "typeorm";
+import { IProblemStatistic, IUser } from "./types";
+
+@Entity("problem_statistics")
+@Unique(["user_id", "factor1", "factor2"])
+export class ProblemStatistic implements IProblemStatistic {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  user_id: number;
+
+  @Column()
+  factor1: number;
+
+  @Column()
+  factor2: number;
+
+  @Column({ default: 0 })
+  total_attempts: number;
+
+  @Column({ default: 0 })
+  correct_attempts: number;
+
+  @Column({ default: 0 })
+  avg_response_time_ms: number;
+
+  @UpdateDateColumn()
+  last_attempt_at: Date;
+
+  @ManyToOne("User", "statistics")
+  @JoinColumn({ name: "user_id" })
+  user: IUser;
+}
+
+================
+File: backend/src/models/types.ts
+================
+export interface IUser {
+  id: number;
+  name: string;
+  is_parent: boolean;
+  current_level: number;
+  created_at: Date;
+  sessions: IExerciseSession[];
+  statistics: IProblemStatistic[];
+}
+
+export interface IExerciseSession {
+  id: number;
+  user_id: number;
+  start_time: Date;
+  end_time: Date | null;
+  total_problems: number;
+  completed_problems: number;
+  is_completed: boolean;
+  user: IUser;
+  attempts: IProblemAttempt[];
+}
+
+export interface IProblemAttempt {
+  id: number;
+  session_id: number;
+  factor1: number;
+  factor2: number;
+  user_answer: number | null;
+  is_correct: boolean | null;
+  response_time_ms: number | null;
+  attempt_number: number;
+  created_at: Date;
+  session: IExerciseSession;
+}
+
+export interface IProblemStatistic {
+  id: number;
+  user_id: number;
+  factor1: number;
+  factor2: number;
+  total_attempts: number;
+  correct_attempts: number;
+  avg_response_time_ms: number;
+  last_attempt_at: Date;
+  user: IUser;
+}
+
+================
+File: backend/src/models/User.ts
+================
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from "typeorm";
+import { IUser, IExerciseSession, IProblemStatistic } from "./types";
+
+@Entity("users")
+export class User implements IUser {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  name: string;
+
+  @Column({ default: false })
+  is_parent: boolean;
+
+  @Column({ default: 1 })
+  current_level: number;
+
+  @CreateDateColumn()
+  created_at: Date;
+
+  @OneToMany("ExerciseSession", "user")
+  sessions: IExerciseSession[];
+
+  @OneToMany("ProblemStatistic", "user")
+  statistics: IProblemStatistic[];
+}
+
+================
+File: backend/src/routes/sessions.routes.ts
+================
+import { Router } from 'express';
+import { SessionsController } from '../controllers/sessions.controller';
+
+const router = Router();
+
+router.post('/', SessionsController.create);
+router.get('/:sessionId', SessionsController.getSession);
+router.get('/:sessionId/problems/next', SessionsController.getNextProblem);
+router.post('/:sessionId/attempts', SessionsController.submitAttempt);
+
+export default router;
+
+================
+File: backend/src/routes/users.routes.ts
+================
+import { Router } from 'express';
+import { UsersController } from '../controllers/users.controller';
+
+const router = Router();
+
+router.get('/', UsersController.list);
+
+export default router;
+
+================
+File: backend/src/scripts/resetWeights.ts
+================
+// backend/src/scripts/resetWeights.ts
+// Script to reset problem weights and statistics while preserving users
+
+import { AppDataSource } from "../config/database";
+import { User } from "../models/User";
+import { ProblemState } from "../models/ProblemState";
+import { ProblemStatistic } from "../models/ProblemStatistic";
+
+/**
+ * Resets problem weights and statistics for all users or a specific user
+ * @param userId Optional user ID to reset data for a specific user only
+ */
+async function resetUserData(userId?: number) {
+  try {
+    // Initialize the database connection
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+      console.log("Database connection initialized");
+    }
+
+    const problemStateRepo = AppDataSource.getRepository(ProblemState);
+    const problemStatsRepo = AppDataSource.getRepository(ProblemStatistic);
+    
+    // Build the query conditions
+    const whereCondition = userId ? { userId } : {};
+    
+    // Delete problem states (weights)
+    const deleteWeightsResult = await problemStateRepo.delete(whereCondition);
+    console.log(`Deleted ${deleteWeightsResult.affected || 0} problem weights`);
+    
+    // Delete problem statistics
+    const deleteStatsResult = await problemStatsRepo.delete(userId ? { user_id: userId } : {});
+    console.log(`Deleted ${deleteStatsResult.affected || 0} problem statistics`);
+
+    // If we're resetting data for all users
+    if (!userId) {
+      console.log("All users' problem data has been reset");
+    } else {
+      // Get the user's name for the confirmation message
+      const user = await AppDataSource.getRepository(User).findOne({ 
+        where: { id: userId },
+        select: ['id', 'name']
+      });
+      console.log(`Problem data has been reset for user: ${user?.name || 'Unknown'} (ID: ${userId})`);
+    }
+    
+    console.log("Reset complete!");
+  } catch (error) {
+    console.error("Error resetting data:", error);
+  } finally {
+    // Close the database connection
+    if (AppDataSource.isInitialized) {
+      await AppDataSource.destroy();
+      console.log("Database connection closed");
+    }
+  }
+}
+
+// Handle command-line arguments
+async function main() {
+  const args = process.argv.slice(2);
+  
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log("Usage: npm run reset-weights [-- --user <userId>]");
+    console.log("");
+    console.log("Options:");
+    console.log("  --user <userId>  Reset data for a specific user only");
+    console.log("  --help, -h       Show this help message");
+    process.exit(0);
+  }
+  
+  const userIdIndex = args.indexOf("--user");
+  if (userIdIndex >= 0 && userIdIndex < args.length - 1) {
+    const userId = parseInt(args[userIdIndex + 1], 10);
+    if (isNaN(userId)) {
+      console.error("Error: User ID must be a number");
+      process.exit(1);
+    }
+    await resetUserData(userId);
+  } else {
+    // Confirm before wiping all data
+    if (args.includes("--force") || await confirmAction("Are you sure you want to reset ALL users' problem data? This action cannot be undone.")) {
+      await resetUserData();
+    } else {
+      console.log("Reset canceled.");
+    }
+  }
+}
+
+// Helper function to prompt for confirmation
+async function confirmAction(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    // Use dynamic import for Node.js readline (ESM compatible)
+    import('readline').then(readlineModule => {
+      const readline = readlineModule.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+
+      readline.question(`${message} (y/N): `, (answer: string) => {
+        readline.close();
+        resolve(answer.toLowerCase() === 'y');
+      });
+    });
+  });
+}
+
+// Run the script
+main().catch(error => {
+  console.error("Unhandled error:", error);
+  process.exit(1);
+});
+
+================
+File: backend/src/services/problemSelection/__tests__/selection.test.ts
+================
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import { ProblemSelector } from '../selection';
+import { Problem, ProblemHistory, ProblemSelectionConfig, ProblemStateStorage, NormalizedProblem } from '../types';
+
+// Mock storage implementation for testing
+class MockStorage implements ProblemStateStorage {
+  private states = new Map<string, { weight: number; lastSeen: number }>();
+
+  private getKey(userId: number, normalized: NormalizedProblem): string {
+    return `${userId}-${normalized.smaller}x${normalized.larger}`;
+  }
+
+  getProblemState(userId: number, normalized: NormalizedProblem) {
+    const key = this.getKey(userId, normalized);
+    if (!this.states.has(key)) {
+      this.states.set(key, {
+        weight: normalized.smaller * normalized.larger,
+        lastSeen: 0
+      });
+    }
+    return this.states.get(key)!;
+  }
+
+  updateProblemState(userId: number, normalized: NormalizedProblem, state: { weight: number; lastSeen: number }) {
+    const key = this.getKey(userId, normalized);
+    this.states.set(key, state);
+  }
+
+  // Helper method for testing
+  getAllStates() {
+    return this.states;
+  }
+}
+
+describe('Problem Selection System', () => {
+  let selector: ProblemSelector;
+  let storage: MockStorage;
+  let testConfig: ProblemSelectionConfig;
+  let mockRandom: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    testConfig = {
+      minFactor: 2,
+      maxFactor: 5, // Using smaller range for tests
+      recentProblemCount: 3,
+      targetResponseTime: 5000,
+      weightIncreaseWrong: 5,
+      weightDecreaseFast: 3,
+      weightDecreaseSlow: 1
+    };
+    storage = new MockStorage();
+    selector = new ProblemSelector(storage);
+    mockRandom = jest.spyOn(Math, 'random');
+  });
+
+  afterEach(() => {
+    mockRandom.mockRestore();
+  });
+
+  describe('Problem Normalization', () => {
+    it('should treat reversed factors as the same problem for weight updates', () => {
+      const userId = 1;
+      const problem1: Problem = { factor1: 3, factor2: 4 };
+      
+      // Update weight for the problem
+      selector.updateProblemAfterAttempt(userId, problem1, false, 3000, testConfig);
+      
+      // Get state for problem2 - should have the same updated weight
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      
+      expect(state.weight).toBe(17); // 12 + 5 (weightIncreaseWrong)
+    });
+
+    it('should randomize factor order in selected problems', () => {
+      const history: ProblemHistory[] = [];
+      
+      // Force random to return 0 (smaller first)
+      mockRandom.mockReturnValueOnce(0);
+      const selected1 = selector.selectNextProblem(1, history, testConfig);
+      expect(selected1.factor1).toBeLessThanOrEqual(selected1.factor2);
+      
+      // Force random to return 0.9 (larger first)
+      mockRandom.mockReturnValueOnce(0.9);
+      const selected2 = selector.selectNextProblem(1, history, testConfig);
+      expect(selected2.factor1).toBeGreaterThanOrEqual(selected2.factor2);
+    });
+  });
+
+  describe('Problem Weight Updates', () => {
+    const userId = 1;
+    const problem: Problem = { factor1: 3, factor2: 4 };
+
+    it('should increase weight for wrong answers', () => {
+      selector.updateProblemAfterAttempt(userId, problem, false, 3000, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(17); // 12 + 5 (weightIncreaseWrong)
+    });
+
+    it('should decrease weight more for fast correct answers', () => {
+      selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(9); // 12 - 3 (weightDecreaseFast)
+    });
+
+    it('should decrease weight less for slow correct answers', () => {
+      selector.updateProblemAfterAttempt(userId, problem, true, 6000, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(11); // 12 - 1 (weightDecreaseSlow)
+    });
+
+    it('should not let weight go below 1', () => {
+      // Multiple fast correct answers
+      for (let i = 0; i < 5; i++) {
+        selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
+      }
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = storage.getProblemState(userId, normalized);
+      expect(state.weight).toBe(1);
+    });
+  });
+
+  describe('Problem Selection', () => {
+    const userId = 1;
+
+    it('should select problem with highest weight when no history', () => {
+      const history: ProblemHistory[] = [];
+      mockRandom.mockReturnValue(0); // Force consistent order for test
+      const selected = selector.selectNextProblem(userId, history, testConfig);
+      
+      // With factors 2-5, 5x5=25 should be the highest initial weight
+      expect(Math.max(selected.factor1, selected.factor2)).toBe(5);
+      expect(Math.min(selected.factor1, selected.factor2)).toBe(5);
+    });
+
+    it('should not select recently seen problems in either order', () => {
+      const history: ProblemHistory[] = [
+        {
+          factor1: 5,
+          factor2: 4,
+          correct: true,
+          timeToAnswer: 3000,
+          timestamp: Date.now()
+        }
+      ];
+      
+      const selected = selector.selectNextProblem(userId, history, testConfig);
+      
+      // Should not select 5x4 or 4x5
+      expect(selected).not.toEqual({ factor1: 5, factor2: 4 });
+      expect(selected).not.toEqual({ factor1: 4, factor2: 5 });
+    });
+  });
+
+  describe('Per-User Problem States', () => {
+    it('should maintain separate weights for different users', () => {
+      const problem: Problem = { factor1: 3, factor2: 4 };
+      const normalized = { smaller: 3, larger: 4 };
+      
+      // User 1 gets it wrong
+      selector.updateProblemAfterAttempt(1, problem, false, 3000, testConfig);
+      
+      // User 2 gets it right quickly
+      selector.updateProblemAfterAttempt(2, problem, true, 3000, testConfig);
+      
+      const user1State = storage.getProblemState(1, normalized);
+      const user2State = storage.getProblemState(2, normalized);
+      
+      expect(user1State.weight).toBe(17); // Increased for wrong answer
+      expect(user2State.weight).toBe(9);  // Decreased for fast correct answer
+    });
+  });
+});
+
+================
+File: backend/src/services/problemSelection/selection.ts
+================
+import { Problem, ProblemHistory, ProblemSelectionConfig, DEFAULT_CONFIG, ProblemStateStorage, NormalizedProblem, ProblemState } from './types';
+import { SQLiteProblemStateStorage } from './sqliteStorage';
+
+export class ProblemSelector {
+  protected storage: ProblemStateStorage;
+
+  constructor(storage?: ProblemStateStorage) {
+    this.storage = storage || new SQLiteProblemStateStorage();
+  }
+
+  /**
+   * Normalizes a problem by ensuring smaller factor comes first.
+   * This ensures that commutative pairs (e.g., 3×4 and 4×3) are treated as the same problem.
+   * 
+   * @param problem Problem to normalize
+   * @returns Normalized problem with smaller factor first
+   */
+  private normalizeProblem(problem: Problem): NormalizedProblem {
+    return {
+      smaller: Math.min(problem.factor1, problem.factor2),
+      larger: Math.max(problem.factor1, problem.factor2)
+    };
+  }
+
+  /**
+   * Converts a normalized problem back to regular problem with randomized factor order.
+   * This ensures that users see both orders of factors even though we treat them as the same problem.
+   * 
+   * @param normalized Normalized problem
+   * @returns Problem with randomized factor order
+   */
+  private denormalizeProblem(normalized: NormalizedProblem): Problem {
+    // Randomly decide factor order
+    return Math.random() < 0.5
+      ? { factor1: normalized.smaller, factor2: normalized.larger }
+      : { factor1: normalized.larger, factor2: normalized.smaller };
+  }
+
+  /**
+   * Generates all possible unique problems within the configured range.
+   * Uses normalization to avoid duplicate commutative pairs.
+   * 
+   * @param config Configuration parameters
+   * @returns Array of all possible normalized problems
+   */
+  private generateAllProblems(config: ProblemSelectionConfig = DEFAULT_CONFIG): NormalizedProblem[] {
+    const problems: NormalizedProblem[] = [];
+    for (let i = config.minFactor; i <= config.maxFactor; i++) {
+      for (let j = i; j <= config.maxFactor; j++) {  // Start from i to avoid duplicates
+        problems.push({ smaller: i, larger: j });
+      }
+    }
+    return problems;
+  }
+
+/**
+   * Selects the next problem to present to the user based on weights and history
+   * 
+   * @param userId User's ID
+   * @param history User's problem history
+   * @param config Configuration parameters
+   * @returns Selected problem with randomized factor order
+   */
+async selectNextProblem(
+  userId: number,
+  history: ProblemHistory[],
+  config: ProblemSelectionConfig = DEFAULT_CONFIG
+): Promise<Problem> {
+  console.log(`\nSelecting next problem for user ${userId}:`);
+  console.log(`Config: recentProblemCount=${config.recentProblemCount}, minFactor=${config.minFactor}, maxFactor=${config.maxFactor}`);
+  
+  // Generate all possible problems
+  const allProblems = this.generateAllProblems(config);
+  console.log(`Total possible problems: ${allProblems.length}`);
+  
+  // Get recent problems, sorted by timestamp (newest first)
+  const recentHistory = [...history].sort((a, b) => b.timestamp - a.timestamp);
+  
+  // Convert history to normalized form for comparison
+  const recentNormalized = recentHistory
+    .slice(0, config.recentProblemCount)
+    .map(h => this.normalizeProblem(h));
+  
+  console.log(`Recent history count: ${recentHistory.length}`);
+  console.log(`Problems to exclude: ${Math.min(recentNormalized.length, config.recentProblemCount)}`);
+  
+  if (recentNormalized.length > 0) {
+    console.log('Most recent problems:');
+    recentNormalized.slice(0, 5).forEach((p, i) => {
+      console.log(`  ${i+1}. ${p.smaller}×${p.larger} (${recentHistory[i].timestamp})`);
+    });
+  }
+  
+  // Filter out recently seen problems
+  const availableProblems = allProblems.filter(p => 
+    !recentNormalized.some(r => 
+      r.smaller === p.smaller && r.larger === p.larger
+    )
+  );
+  
+  console.log(`Available problems after filtering: ${availableProblems.length}`);
+  
+  // Use a graduated fallback approach if we have few available problems
+  const MIN_AVAILABLE_THRESHOLD = 3;
+  let problemPool = availableProblems;
+  
+  if (availableProblems.length < MIN_AVAILABLE_THRESHOLD) {
+    // If we have too few available problems, we'll use a more relaxed selection strategy
+    if (availableProblems.length === 0) {
+      console.log('No available problems after filtering recent history. Using full problem set.');
+      problemPool = allProblems;
+    } else {
+      console.log(`Only ${availableProblems.length} problems available, but proceeding with limited selection.`);
+    }
+  }
+  
+  // Get problem weights for the pool
+  const problemWeights: { problem: NormalizedProblem; weight: number }[] = [];
+  for (const problem of problemPool) {
+    const state = await this.storage.getProblemState(userId, problem);
+    problemWeights.push({
+      problem,
+      weight: state.weight
+    });
+  }
+  
+  // Sort problems by weight (highest first)
+  problemWeights.sort((a, b) => b.weight - a.weight);
+  
+  // Log top 5 highest weight problems
+  console.log('Top weighted problems:');
+  problemWeights.slice(0, 5).forEach((pw, i) => {
+    console.log(`  ${i+1}. ${pw.problem.smaller}×${pw.problem.larger} (weight: ${pw.weight.toFixed(2)})`);
+  });
+  
+  // Select the problem with highest weight
+  const selected = problemWeights[0].problem;
+  console.log(`Selected problem: ${selected.smaller}×${selected.larger} (weight: ${problemWeights[0].weight.toFixed(2)})`);
+  
+  // Return the selected problem in randomized factor order
+  return this.denormalizeProblem(selected);
+}
+
+async updateProblemAfterAttempt(
+  userId: number,
+  problem: Problem,
+  correct: boolean,
+  timeToAnswer: number,
+  config: ProblemSelectionConfig = DEFAULT_CONFIG
+): Promise<void> {
+  // Normalize problem to ensure consistent storage regardless of factor order
+  const normalized = this.normalizeProblem(problem);
+  const state = await this.storage.getProblemState(userId, normalized);
+  
+  // Update weight based on performance
+  let newWeight = state.weight;
+  let adjustmentReason = '';
+  
+  if (!correct) {
+    // Incorrect answer: increase weight
+    newWeight += config.weightIncreaseWrong;
+    adjustmentReason = `incorrect answer (+${config.weightIncreaseWrong})`;
+  } else if (timeToAnswer < config.targetResponseTime) {
+    // Fast correct answer: decrease weight more
+    newWeight -= config.weightDecreaseFast;
+    adjustmentReason = `fast correct answer (-${config.weightDecreaseFast})`;
+  } else {
+    // Slow correct answer: decrease weight less
+    newWeight -= config.weightDecreaseSlow;
+    adjustmentReason = `slow correct answer (-${config.weightDecreaseSlow})`;
+  }
+
+  // Ensure weight doesn't go below 1
+  const wasClipped = newWeight < 1;
+  newWeight = Math.max(1, newWeight);
+
+  // Update state with new weight and timestamp
+  await this.storage.updateProblemState(userId, normalized, {
+    weight: newWeight,
+    lastSeen: Date.now()
+  });
+
+  // Enhanced logging for debugging
+  console.log(`Problem ${normalized.smaller}x${normalized.larger} weight updated:`, {
+    userId,
+    oldWeight: state.weight,
+    newWeight,
+    weightChange: newWeight - state.weight,
+    correct,
+    timeToAnswer,
+    targetResponseTime: config.targetResponseTime,
+    adjustmentReason,
+    wasClipped: wasClipped ? 'Yes (minimum weight enforced)' : 'No'
+  });
+}
+
+  /**
+   * Gets the current state of a problem for a user, using normalization
+   * to ensure consistent state regardless of factor order.
+   * 
+   * @param userId User's ID
+   * @param problem Problem to get state for (could be in any order)
+   * @returns Current problem state
+   */
+  async getProblemState(userId: number, problem: Problem): Promise<ProblemState> {
+    const normalized = this.normalizeProblem(problem);
+    return await this.storage.getProblemState(userId, normalized);
+  }
+}
+
+export const problemSelector = new ProblemSelector();
+
+================
+File: backend/src/services/problemSelection/sqliteStorage.ts
+================
+import { AppDataSource } from "../../config/database";
+import { NormalizedProblem, ProblemState as ProblemStateType, ProblemStateStorage } from "./types";
+import { ProblemState } from "../../models/ProblemState";
+
+export class SQLiteProblemStateStorage implements ProblemStateStorage {
+    async getProblemState(userId: number, normalized: NormalizedProblem): Promise<ProblemStateType> {
+        const repository = AppDataSource.getRepository(ProblemState);
+        
+        console.log(`\nGetting problem state for user ${userId}, factors: ${normalized.smaller}x${normalized.larger}`);
+        
+        try {
+            // Always store with smaller factor first for consistency
+            const state = await repository
+                .createQueryBuilder('state')
+                .where(
+                    'state.userId = :userId AND state.factor1 = :smaller AND state.factor2 = :larger',
+                    { 
+                        userId,
+                        smaller: normalized.smaller,
+                        larger: normalized.larger
+                    }
+                )
+                .getOne();
+
+            if (state) {
+                console.log('Found existing state:', state);
+                return {
+                    weight: state.weight,
+                    lastSeen: state.lastSeen
+                };
+            }
+
+            console.log('No existing state found, returning default');
+            
+            // FIXED: Use a constant default weight instead of factor product
+            // This ensures all problems start at the same difficulty level
+            const DEFAULT_WEIGHT = 10;
+            
+            // Return default state if none exists
+            return {
+                weight: DEFAULT_WEIGHT,
+                lastSeen: 0
+            };
+        } catch (error) {
+            console.error('Error getting problem state:', error);
+            throw error;
+        }
+    }
+
+    async updateProblemState(userId: number, normalized: NormalizedProblem, state: ProblemStateType): Promise<void> {
+        const repository = AppDataSource.getRepository(ProblemState);
+        
+        console.log(`\nUpdating problem state for user ${userId}, factors: ${normalized.smaller}x${normalized.larger}`);
+        console.log('New state:', state);
+        
+        try {
+            // Always query with smaller factor first for consistency
+            let problemState = await repository
+                .createQueryBuilder('state')
+                .where(
+                    'state.userId = :userId AND state.factor1 = :smaller AND state.factor2 = :larger',
+                    { 
+                        userId,
+                        smaller: normalized.smaller,
+                        larger: normalized.larger
+                    }
+                )
+                .getOne();
+
+            if (!problemState) {
+                console.log('Creating new problem state');
+                // Create new state if none exists
+                problemState = new ProblemState();
+                problemState.userId = userId;
+                // Always store with smaller factor first for consistency
+                problemState.factor1 = normalized.smaller;
+                problemState.factor2 = normalized.larger;
+            } else {
+                console.log('Updating existing problem state');
+            }
+
+            // Update state
+            problemState.weight = state.weight;
+            problemState.lastSeen = state.lastSeen;
+
+            // Save to database
+            const saved = await repository.save(problemState);
+            console.log('Saved problem state:', saved);
+        } catch (error) {
+            console.error('Error updating problem state:', error);
+            throw error;
+        }
+    }
+}
+
+================
+File: backend/src/services/problemSelection/storage.ts
+================
+import { NormalizedProblem, ProblemState, ProblemStateStorage } from './types';
+
+export class InMemoryProblemStateStorage implements ProblemStateStorage {
+  private states: Map<string, ProblemState>;
+
+  constructor() {
+    this.states = new Map();
+  }
+
+  private getKey(userId: number, normalized: NormalizedProblem): string {
+    return `${userId}-${normalized.smaller}x${normalized.larger}`;
+  }
+
+  async getProblemState(userId: number, normalized: NormalizedProblem): Promise<ProblemState> {
+    const key = this.getKey(userId, normalized);
+    if (!this.states.has(key)) {
+      // Initialize with default weight of 10, consistent with SQLite implementation
+      this.states.set(key, {
+        weight: 10,
+        lastSeen: 0
+      });
+    }
+    return this.states.get(key)!;
+  }
+
+  async updateProblemState(userId: number, normalized: NormalizedProblem, state: ProblemState): Promise<void> {
+    const key = this.getKey(userId, normalized);
+    this.states.set(key, state);
+  }
+}
+
+================
+File: backend/src/services/problemSelection/types.ts
+================
+/**
+ * Core types for the problem selection system
+ */
+
+export interface Problem {
+  factor1: number;
+  factor2: number;
+}
+
+export interface NormalizedProblem {
+  smaller: number;
+  larger: number;
+}
+
+export interface ProblemHistory {
+  factor1: number;
+  factor2: number;
+  correct: boolean;
+  timeToAnswer: number;
+  timestamp: number;
+}
+
+export interface ProblemState {
+  weight: number;
+  lastSeen: number;
+}
+
+export interface ProblemStateStorage {
+  getProblemState(userId: number, normalized: NormalizedProblem): Promise<ProblemState>;
+  updateProblemState(userId: number, normalized: NormalizedProblem, state: ProblemState): Promise<void>;
+}
+
+export interface ProblemSelectionConfig {
+  // Factor Range
+  minFactor: number;
+  maxFactor: number;
+
+  // Problem Selection
+  recentProblemCount: number;     // How many recent problems to exclude
+  targetResponseTime: number;      // Target time to solve problem (ms)
+  
+  // Weight Adjustments
+  weightIncreaseWrong: number;    // W: Weight increase for wrong answer
+  weightDecreaseFast: number;     // X: Weight decrease for fast correct answer
+  weightDecreaseSlow: number;     // Z: Weight decrease for slow correct answer
+}
+
+// Optimize weight adjustments for better differentiation
+export const DEFAULT_CONFIG: ProblemSelectionConfig = {
+  minFactor: 2,
+  maxFactor: 10,
+  
+  recentProblemCount: 20,
+  targetResponseTime: 5000,       // 5 seconds
+  
+  weightIncreaseWrong: 7,         // Increase weight significantly for wrong answers
+  weightDecreaseFast: 3,          // Moderate decrease for fast correct answers 
+  weightDecreaseSlow: 1           // Small decrease for slow correct answers
+};
+
+================
+File: backend/src/app.ts
+================
+import express, { Request, Response, NextFunction } from "express";
+import cors from "cors";
+import { json } from "body-parser";
+import dotenv from "dotenv";
+import usersRoutes from "./routes/users.routes";
+import sessionsRoutes from "./routes/sessions.routes";
+
+// Load environment variables
+dotenv.config();
+
+// Create Express app
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(json());
+
+// Request logging middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// Routes
+app.use("/api/users", usersRoutes);
+app.use("/api/sessions", sessionsRoutes);
+
+// Health check endpoint
+app.get("/health", (_: Request, res: Response) => {
+  res.status(200).json({ status: "ok" });
+});
+
+// Error handling middleware
+app.use((err: Error, _req: Request, res: Response) => {
+  console.error(err.stack);
+  res.status(500).json({
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "An unexpected error occurred",
+    }
+  });
+});
+
+export default app;
+
+================
+File: backend/src/server.ts
+================
+import app from "./app";
+import { AppDataSource } from "./config/database";
+import { User } from "./models/User";
+
+const PORT = process.env.PORT || 3001;
+
+// Initialize database and start server
+async function startServer() {
+  try {
+    // Initialize database connection
+    await AppDataSource.initialize();
+    console.log("Database connection initialized");
+
+    // Run migrations
+    await AppDataSource.runMigrations();
+    console.log("Database migrations completed");
+
+    // Create a test user if none exists
+    const userRepo = AppDataSource.getRepository(User);
+    const userCount = await userRepo.count();
+    if (userCount === 0) {
+      await userRepo.save({
+        name: 'Test User',
+        is_parent: false,
+        current_level: 1
+      });
+      console.log("Created test user");
+    }
+
+    // Start the server
+    app.listen(PORT, () => {
+      console.log(`Server is running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Error during startup:", error);
+    process.exit(1);
+  }
+}
+
+// Handle shutdown gracefully
+process.on('SIGINT', async () => {
+  try {
+    await AppDataSource.destroy();
+    console.log('Database connection closed');
+    process.exit(0);
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+});
+
+startServer();
+
+================
+File: backend/.dockerignore
+================
+# Version control
+.git
+.gitignore
+
+# Dependencies
+node_modules
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Environment
+.env
+.env.*
+
+# Build output
+dist
+build
+coverage
+
+# Development
+*.test.ts
+*.spec.ts
+__tests__
+__mocks__
+*.md
+*.log
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Data
+data/*
+
+================
+File: backend/.env
+================
+NODE_ENV=development
+PORT=3001
+
+================
+File: backend/docker-compose.yml
+================
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+    command: npm run dev
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  data:
+
+================
+File: backend/Dockerfile
+================
+# Build stage
+FROM node:20-alpine as builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Production stage
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install production dependencies only
+RUN npm ci --only=production
+
+# Copy built application from builder stage
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/src/migrations ./src/migrations
+
+# Create data directory for SQLite
+RUN mkdir -p data
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PORT=3001
+
+# Expose port
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+# Start the application
+CMD ["node", "dist/server.js"]
+
+================
+File: backend/package.json
+================
+{
+  "name": "math-practice-backend",
+  "version": "1.0.0",
+  "description": "Backend server for math practice application",
+  "main": "dist/server.js",
+  "scripts": {
+    "start": "node dist/server.js",
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "build": "tsc",
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration:generate": "npm run typeorm migration:generate",
+    "migration:run": "npm run typeorm migration:run",
+    "migration:revert": "npm run typeorm migration:revert",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "reset-weights": "ts-node src/scripts/resetWeights.ts",
+    "reset-weights:user": "ts-node src/scripts/resetWeights.ts --user"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "setupFiles": [
+      "dotenv/config"
+    ]
+  },
+  "devDependencies": {
+    "@types/body-parser": "^1.19.5",
+    "@types/cors": "^2.8.17",
+    "@types/dotenv": "^8.2.3",
+    "@types/express": "^5.0.0",
+    "@types/jest": "^29.5.14",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.9",
+    "ts-jest": "^29.2.6",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.3",
+    "sqlite3": "^5.1.7",
+    "typeorm": "^0.3.20"
+  }
+}
+
+================
+File: backend/tsconfig.json
+================
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "strictPropertyInitialization": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "**/*.test.ts"]
+}
+
+================
+File: backend/typeorm.config.ts
+================
+import { AppDataSource } from "./src/config/database";
+
+export default AppDataSource;
+
+================
+File: public/vite.svg
+================
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
+
+================
+File: src/assets/react.svg
+================
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="35.93" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 228"><path fill="#00D8FF" d="M210.483 73.824a171.49 171.49 0 0 0-8.24-2.597c.465-1.9.893-3.777 1.273-5.621c6.238-30.281 2.16-54.676-11.769-62.708c-13.355-7.7-35.196.329-57.254 19.526a171.23 171.23 0 0 0-6.375 5.848a155.866 155.866 0 0 0-4.241-3.917C100.759 3.829 77.587-4.822 63.673 3.233C50.33 10.957 46.379 33.89 51.995 62.588a170.974 170.974 0 0 0 1.892 8.48c-3.28.932-6.445 1.924-9.474 2.98C17.309 83.498 0 98.307 0 113.668c0 15.865 18.582 31.778 46.812 41.427a145.52 145.52 0 0 0 6.921 2.165a167.467 167.467 0 0 0-2.01 9.138c-5.354 28.2-1.173 50.591 12.134 58.266c13.744 7.926 36.812-.22 59.273-19.855a145.567 145.567 0 0 0 5.342-4.923a168.064 168.064 0 0 0 6.92 6.314c21.758 18.722 43.246 26.282 56.54 18.586c13.731-7.949 18.194-32.003 12.4-61.268a145.016 145.016 0 0 0-1.535-6.842c1.62-.48 3.21-.974 4.76-1.488c29.348-9.723 48.443-25.443 48.443-41.52c0-15.417-17.868-30.326-45.517-39.844Zm-6.365 70.984c-1.4.463-2.836.91-4.3 1.345c-3.24-10.257-7.612-21.163-12.963-32.432c5.106-11 9.31-21.767 12.459-31.957c2.619.758 5.16 1.557 7.61 2.4c23.69 8.156 38.14 20.213 38.14 29.504c0 9.896-15.606 22.743-40.946 31.14Zm-10.514 20.834c2.562 12.94 2.927 24.64 1.23 33.787c-1.524 8.219-4.59 13.698-8.382 15.893c-8.067 4.67-25.32-1.4-43.927-17.412a156.726 156.726 0 0 1-6.437-5.87c7.214-7.889 14.423-17.06 21.459-27.246c12.376-1.098 24.068-2.894 34.671-5.345a134.17 134.17 0 0 1 1.386 6.193ZM87.276 214.515c-7.882 2.783-14.16 2.863-17.955.675c-8.075-4.657-11.432-22.636-6.853-46.752a156.923 156.923 0 0 1 1.869-8.499c10.486 2.32 22.093 3.988 34.498 4.994c7.084 9.967 14.501 19.128 21.976 27.15a134.668 134.668 0 0 1-4.877 4.492c-9.933 8.682-19.886 14.842-28.658 17.94ZM50.35 144.747c-12.483-4.267-22.792-9.812-29.858-15.863c-6.35-5.437-9.555-10.836-9.555-15.216c0-9.322 13.897-21.212 37.076-29.293c2.813-.98 5.757-1.905 8.812-2.773c3.204 10.42 7.406 21.315 12.477 32.332c-5.137 11.18-9.399 22.249-12.634 32.792a134.718 134.718 0 0 1-6.318-1.979Zm12.378-84.26c-4.811-24.587-1.616-43.134 6.425-47.789c8.564-4.958 27.502 2.111 47.463 19.835a144.318 144.318 0 0 1 3.841 3.545c-7.438 7.987-14.787 17.08-21.808 26.988c-12.04 1.116-23.565 2.908-34.161 5.309a160.342 160.342 0 0 1-1.76-7.887Zm110.427 27.268a347.8 347.8 0 0 0-7.785-12.803c8.168 1.033 15.994 2.404 23.343 4.08c-2.206 7.072-4.956 14.465-8.193 22.045a381.151 381.151 0 0 0-7.365-13.322Zm-45.032-43.861c5.044 5.465 10.096 11.566 15.065 18.186a322.04 322.04 0 0 0-30.257-.006c4.974-6.559 10.069-12.652 15.192-18.18ZM82.802 87.83a323.167 323.167 0 0 0-7.227 13.238c-3.184-7.553-5.909-14.98-8.134-22.152c7.304-1.634 15.093-2.97 23.209-3.984a321.524 321.524 0 0 0-7.848 12.897Zm8.081 65.352c-8.385-.936-16.291-2.203-23.593-3.793c2.26-7.3 5.045-14.885 8.298-22.6a321.187 321.187 0 0 0 7.257 13.246c2.594 4.48 5.28 8.868 8.038 13.147Zm37.542 31.03c-5.184-5.592-10.354-11.779-15.403-18.433c4.902.192 9.899.29 14.978.29c5.218 0 10.376-.117 15.453-.343c-4.985 6.774-10.018 12.97-15.028 18.486Zm52.198-57.817c3.422 7.8 6.306 15.345 8.596 22.52c-7.422 1.694-15.436 3.058-23.88 4.071a382.417 382.417 0 0 0 7.859-13.026a347.403 347.403 0 0 0 7.425-13.565Zm-16.898 8.101a358.557 358.557 0 0 1-12.281 19.815a329.4 329.4 0 0 1-23.444.823c-7.967 0-15.716-.248-23.178-.732a310.202 310.202 0 0 1-12.513-19.846h.001a307.41 307.41 0 0 1-10.923-20.627a310.278 310.278 0 0 1 10.89-20.637l-.001.001a307.318 307.318 0 0 1 12.413-19.761c7.613-.576 15.42-.876 23.31-.876H128c7.926 0 15.743.303 23.354.883a329.357 329.357 0 0 1 12.335 19.695a358.489 358.489 0 0 1 11.036 20.54a329.472 329.472 0 0 1-11 20.722Zm22.56-122.124c8.572 4.944 11.906 24.881 6.52 51.026c-.344 1.668-.73 3.367-1.15 5.09c-10.622-2.452-22.155-4.275-34.23-5.408c-7.034-10.017-14.323-19.124-21.64-27.008a160.789 160.789 0 0 1 5.888-5.4c18.9-16.447 36.564-22.941 44.612-18.3ZM128 90.808c12.625 0 22.86 10.235 22.86 22.86s-10.235 22.86-22.86 22.86s-22.86-10.235-22.86-22.86s10.235-22.86 22.86-22.86Z"></path></svg>
+
+================
+File: src/components/Exercise/hooks/useExercise.ts
+================
+import { useState, useRef, useCallback } from 'react';
+
+/**
+ * Custom hook to manage exercise timer with pause functionality
+ */
+export const useExerciseTimer = () => {
+  const [startTime, setStartTime] = useState<number>(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const pauseStartTimeRef = useRef<number | null>(null);
+  const totalPauseTimeRef = useRef<number>(0);
+
+  /**
+   * Toggles between paused and unpaused states, tracking pause durations
+   */
+  const togglePause = useCallback(() => {
+    setIsPaused(prevIsPaused => {
+      if (prevIsPaused) {
+        // Resuming - calculate total pause time
+        if (pauseStartTimeRef.current) {
+          totalPauseTimeRef.current += Date.now() - pauseStartTimeRef.current;
+          pauseStartTimeRef.current = null;
+        }
+        return false;
+      } else {
+        // Pausing - record when pause started
+        pauseStartTimeRef.current = Date.now();
+        return true;
+      }
+    });
+  }, []);
+
+  /**
+   * Calculates the actual response time accounting for pauses
+   */
+  const calculateResponseTime = useCallback((): number => {
+    const rawTime = Date.now() - startTime;
+    return rawTime - totalPauseTimeRef.current;
+  }, [startTime]);
+
+  /**
+   * Resets the timer for a new problem
+   */
+  const resetTimer = useCallback(() => {
+    setStartTime(Date.now());
+    totalPauseTimeRef.current = 0;
+    pauseStartTimeRef.current = null;
+  }, []);
+
+  return {
+    startTime,
+    setStartTime,
+    isPaused,
+    setIsPaused,
+    togglePause,
+    calculateResponseTime,
+    resetTimer
+  };
+};
+
+================
+File: src/components/Exercise/CompletionMessage.tsx
+================
+import React from 'react';
+
+interface CompletionMessageProps {
+  correctCount: number;
+  totalProblems: number;
+}
+
+/**
+ * Displays a celebratory message when the exercise is completed
+ */
+const CompletionMessage: React.FC<CompletionMessageProps> = ({ correctCount, totalProblems }) => (
+  <div className="flex flex-col items-center justify-center min-h-[600px] gap-6 p-4">
+    <div className="text-3xl font-bold text-green-600 animate-bounce">
+      {correctCount === totalProblems ? 
+        "Perfect Score! 🎉" : 
+        "Exercise Complete! 🎊"}
+    </div>
+    <div className="text-xl">
+      You got <span className="font-bold text-blue-600">{correctCount}</span> out of <span className="font-bold">{totalProblems}</span> correct!
+    </div>
+    <p className="text-gray-600">Full summary loading...</p>
+  </div>
+);
+
+export default CompletionMessage;
+
+================
+File: src/components/Exercise/component-export.ts
+================
+// This file exports all the components used in the Exercise module
+
+import PauseOverlay from './PauseOverlay';
+import ProgressStats from './ProgressStats';
+import CompletionMessage from './CompletionMessage';
+import LoadingView from './LoadingView';
+import ErrorView from './ErrorView';
+import ExerciseView from './ExerciseView';
+
+export {
+  PauseOverlay,
+  ProgressStats,
+  CompletionMessage,
+  LoadingView,
+  ErrorView,
+  ExerciseView
+};
+
+================
+File: src/components/Exercise/ErrorView.tsx
+================
+import React from 'react';
+
+interface ErrorViewProps {
+  error: string;
+  onReturnHome: () => void;
+}
+
+/**
+ * Displays an error message if something goes wrong
+ */
+const ErrorView: React.FC<ErrorViewProps> = ({ error, onReturnHome }) => (
+  <div className="flex flex-col items-center justify-center min-h-[600px] gap-4">
+    <div className="w-16 h-16 text-red-500 mb-2">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    </div>
+    <p className="text-xl text-red-600">{error}</p>
+    <button
+      onClick={onReturnHome}
+      className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+    >
+      Return to Home
+    </button>
+  </div>
+);
+
+export default ErrorView;
+
+================
+File: src/components/Exercise/Exercise.tsx
+================
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { api, SessionSummary as SessionSummaryType } from '../../services/api';
+import ExerciseView from './ExerciseView';
+import CompletionMessage from './CompletionMessage';
+import SessionSummary from '../SessionSummary/SessionSummary';
+import LoadingView from './LoadingView';
+import ErrorView from './ErrorView';
+
+import { Problem } from './types';
+import { useExerciseTimer } from './hooks/useExercise';
+
+/**
+ * Container component that manages the state and data fetching for the exercise
+ */
+const Exercise: React.FC = () => {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
+  const [currentProblem, setCurrentProblem] = useState<Problem | null>(null);
+  const [currentAnswer, setCurrentAnswer] = useState('0');
+  const [results, setResults] = useState<Array<boolean | null>>([]);
+  const [isComplete, setIsComplete] = useState(false);
+  const [sessionSummary, setSessionSummary] = useState<SessionSummaryType | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [totalProblems, setTotalProblems] = useState(0);
+  const [showCompletionMessage, setShowCompletionMessage] = useState(false);
+  const [correctCount, setCorrectCount] = useState(0);
+
+  const { 
+    setStartTime, 
+    isPaused,
+    togglePause, 
+    calculateResponseTime, 
+    resetTimer 
+  } = useExerciseTimer();
+
+  // Fetch session and first problem on mount
+  useEffect(() => {
+    const fetchSessionAndProblem = async () => {
+      try {
+        if (!sessionId) {
+          throw new Error('No session ID provided');
+        }
+        
+        const parsedSessionId = parseInt(sessionId);
+        const [session, problem] = await Promise.all([
+          api.getSession(parsedSessionId),
+          api.getNextProblem(parsedSessionId)
+        ]);
+        
+        setTotalProblems(session.total_problems);
+        setResults(new Array(session.total_problems).fill(null));
+        setCurrentProblem(problem);
+        setStartTime(Date.now());
+        setIsLoading(false);
+      } catch (err: unknown) {
+        console.error('Error fetching session or problem:', err);
+        setError('Failed to load exercise session. Please try again.');
+        setIsLoading(false);
+      }
+    };
+
+    fetchSessionAndProblem();
+  }, [sessionId, setStartTime]);
+
+  // Handle answer submission
+  const handleNext = async () => {
+    if (!currentProblem || !sessionId || isPaused) return;
+
+    const responseTimeMs = calculateResponseTime();
+    
+    try {
+      const result = await api.submitAttempt(
+        parseInt(sessionId),
+        currentProblem.problemId,
+        parseInt(currentAnswer),
+        responseTimeMs
+      );
+
+      // Update results at current index
+      const newResults = [...results];
+      const currentIndex = newResults.findIndex(r => r === null);
+      if (currentIndex !== -1) {
+        newResults[currentIndex] = result.isCorrect;
+        setResults(newResults);
+      }
+
+      // Update correct count
+      if (result.isCorrect) {
+        setCorrectCount(prev => prev + 1);
+      }
+
+      if (result.isSessionComplete && result.sessionSummary) {
+        // Show completion message briefly before showing full summary
+        setShowCompletionMessage(true);
+        setIsComplete(true);
+        setSessionSummary(result.sessionSummary);
+        
+        // After 2 seconds, hide the completion message to show the full summary
+        setTimeout(() => {
+          setShowCompletionMessage(false);
+        }, 2000);
+      } else {
+        // Fetch next problem
+        const nextProblem = await api.getNextProblem(parseInt(sessionId));
+        setCurrentProblem(nextProblem);
+        setCurrentAnswer('0');
+        resetTimer();
+      }
+    } catch (err: unknown) {
+      console.error('Error submitting attempt:', err);
+      setError('Failed to submit answer. Please try again.');
+    }
+  };
+
+  // Handle keyboard shortcuts for pause/resume
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'p' || e.key === 'P') {
+        togglePause();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePause]);
+
+  if (error) {
+    return <ErrorView error={error} onReturnHome={() => navigate('/')} />;
+  }
+
+  if (isLoading || !currentProblem) {
+    return <LoadingView />;
+  }
+
+  if (isComplete && sessionSummary) {
+    if (showCompletionMessage) {
+      return (
+        <CompletionMessage 
+          correctCount={correctCount} 
+          totalProblems={totalProblems} 
+        />
+      );
+    }
+
+    return (
+      <div className="flex flex-col items-center min-h-[600px] gap-8 p-4">
+        <h2 className="text-2xl font-bold text-gray-800">
+          Exercise Results
+        </h2>
+        <SessionSummary summary={sessionSummary} />
+        <div className="flex gap-4">
+          <button
+            onClick={() => navigate('/')}
+            className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            Start New Session
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ExerciseView
+      currentProblem={currentProblem}
+      currentAnswer={currentAnswer}
+      setCurrentAnswer={setCurrentAnswer}
+      results={results}
+      totalProblems={totalProblems}
+      isPaused={isPaused}
+      togglePause={togglePause}
+      handleNext={handleNext}
+    />
+  );
+};
+
+export default Exercise;
+
+================
+File: src/components/Exercise/ExerciseView.tsx
+================
+import React from 'react';
+import ProblemDisplay from '../ProblemDisplay/ProblemDisplay';
+import NumericKeyboard from '../NumericKeyboard/NumericKeyboard';
+import ProgressIndicator from '../ProgressIndicator/ProgressIndicator';
+import PauseOverlay from './PauseOverlay';
+import ProgressStats from './ProgressStats';
+import { Problem } from './types';
+
+interface ExerciseViewProps {
+  currentProblem: Problem;
+  currentAnswer: string;
+  setCurrentAnswer: (value: string) => void;
+  results: Array<boolean | null>;
+  totalProblems: number;
+  isPaused: boolean;
+  togglePause: () => void;
+  handleNext: () => void;
+}
+
+/**
+ * Presentation component for the exercise, responsible for rendering the UI
+ */
+const ExerciseView: React.FC<ExerciseViewProps> = ({
+  currentProblem,
+  currentAnswer,
+  setCurrentAnswer,
+  results,
+  totalProblems,
+  isPaused,
+  togglePause,
+  handleNext
+}) => {
+  const currentProblemIndex = results.findIndex(r => r === null) === -1 
+    ? totalProblems - 1 
+    : results.findIndex(r => r === null);
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[600px] gap-4 p-4">
+      <div className="w-full max-w-4xl flex justify-between items-center mb-2">
+        <ProgressIndicator
+          totalProblems={totalProblems}
+          currentProblemIndex={currentProblemIndex}
+          results={results}
+          className="w-full h-3"
+        />
+        <button
+          onClick={togglePause}
+          className="ml-4 p-2 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
+          aria-label={isPaused ? "Resume" : "Pause"}
+        >
+          {isPaused ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          )}
+        </button>
+      </div>
+      
+      {isPaused ? (
+        <PauseOverlay onResume={togglePause} />
+      ) : (
+        <div className="flex flex-col items-center gap-6 w-full max-w-2xl">
+          <ProblemDisplay
+            factor1={currentProblem.factor1}
+            factor2={currentProblem.factor2}
+            answer={currentAnswer}
+            className="w-full min-h-[120px] text-5xl md:text-6xl"
+          />
+
+          <div className="flex gap-2 w-full max-w-md">
+            <NumericKeyboard
+              value={currentAnswer}
+              onChange={setCurrentAnswer}
+              onSubmit={currentAnswer !== '0' ? handleNext : undefined}
+              maxLength={3}
+              className="flex-1"
+            />
+            
+            <button
+              onClick={handleNext}
+              disabled={currentAnswer === '0'}
+              aria-label="Next"
+              className={`
+                w-20 rounded-xl text-xl font-semibold p-3
+                transition-colors duration-150 flex items-center justify-center
+                h-[calc(48px*4+0.5rem*3+1.5rem*2)] sm:h-[calc(56px*4+0.5rem*3+1.5rem*2)] md:h-[calc(64px*4+0.5rem*3+1.5rem*2)]
+                ${currentAnswer === '0'
+                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'}
+              `}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-8 w-8"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 5l7 7-7 7"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+      
+      {/* Progress stats at bottom */}
+      <ProgressStats 
+        results={results} 
+        totalProblems={totalProblems} 
+      />
+    </div>
+  );
+};
+
+export default ExerciseView;
+
+================
+File: src/components/Exercise/LoadingView.tsx
+================
+import React from 'react';
+
+/**
+ * Shows a loading screen while the exercise is being initialized
+ */
+const LoadingView: React.FC = () => (
+  <div className="flex items-center justify-center min-h-[600px]">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
+      <p className="text-xl text-gray-600">Loading problems...</p>
+    </div>
+  </div>
+);
+
+export default LoadingView;
+
+================
+File: src/components/Exercise/PauseOverlay.tsx
+================
+import React from 'react';
+
+interface PauseOverlayProps {
+  onResume: () => void;
+}
+
+/**
+ * Shows a pause overlay when the exercise is paused
+ */
+const PauseOverlay: React.FC<PauseOverlayProps> = ({ onResume }) => (
+  <div className="flex flex-col items-center justify-center p-8 bg-white rounded-lg shadow-md w-full max-w-2xl">
+    <h3 className="text-2xl font-bold text-gray-800 mb-4">Session Paused</h3>
+    <p className="text-gray-600 mb-6">Take a break and resume when you're ready!</p>
+    <button
+      onClick={onResume}
+      className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+    >
+      Resume
+    </button>
+  </div>
+);
+
+export default PauseOverlay;
+
+================
+File: src/components/Exercise/ProgressStats.tsx
+================
+import React from 'react';
+
+interface ProgressStatsProps {
+  results: Array<boolean | null>;
+  totalProblems: number;
+}
+
+/**
+ * Displays statistics about the user's progress in the exercise
+ */
+const ProgressStats: React.FC<ProgressStatsProps> = ({ results, totalProblems }) => (
+  <div className="mt-6 text-sm text-gray-600">
+    Problem {results.filter(r => r !== null).length + 1} of {totalProblems}
+    {results.filter(r => r === true).length > 0 && 
+      ` • ${results.filter(r => r === true).length} correct`}
+    {results.filter(r => r === false).length > 0 && 
+      ` • ${results.filter(r => r === false).length} incorrect`}
+  </div>
+);
+
+export default ProgressStats;
+
+================
+File: src/components/Exercise/SmallComponents.tsx
+================
+import React from 'react';
+
+/**
+ * Shows a pause overlay when the exercise is paused
+ */
+export const PauseOverlay: React.FC<{ onResume: () => void }> = ({ onResume }) => (
+  <div className="flex flex-col items-center justify-center p-8 bg-white rounded-lg shadow-md w-full max-w-2xl">
+    <h3 className="text-2xl font-bold text-gray-800 mb-4">Session Paused</h3>
+    <p className="text-gray-600 mb-6">Take a break and resume when you're ready!</p>
+    <button
+      onClick={onResume}
+      className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+    >
+      Resume
+    </button>
+  </div>
+);
+
+/**
+ * Displays statistics about the user's progress in the exercise
+ */
+export const ProgressStats: React.FC<{ results: Array<boolean | null>, totalProblems: number }> = ({ 
+  results, 
+  totalProblems 
+}) => (
+  <div className="mt-6 text-sm text-gray-600">
+    Problem {results.filter(r => r !== null).length + 1} of {totalProblems}
+    {results.filter(r => r === true).length > 0 && 
+      ` • ${results.filter(r => r === true).length} correct`}
+    {results.filter(r => r === false).length > 0 && 
+      ` • ${results.filter(r => r === false).length} incorrect`}
+  </div>
+);
+
+/**
+ * Displays a celebratory message when the exercise is completed
+ */
+export const CompletionMessage: React.FC<{ correctCount: number, totalProblems: number }> = ({ 
+  correctCount, 
+  totalProblems 
+}) => (
+  <div className="flex flex-col items-center justify-center min-h-[600px] gap-6 p-4">
+    <div className="text-3xl font-bold text-green-600 animate-bounce">
+      {correctCount === totalProblems ? 
+        "Perfect Score! 🎉" : 
+        "Exercise Complete! 🎊"}
+    </div>
+    <div className="text-xl">
+      You got <span className="font-bold text-blue-600">{correctCount}</span> out of <span className="font-bold">{totalProblems}</span> correct!
+    </div>
+    <p className="text-gray-600">Full summary loading...</p>
+  </div>
+);
+
+/**
+ * Shows a loading screen while the exercise is being initialized
+ */
+export const LoadingView: React.FC = () => (
+  <div className="flex items-center justify-center min-h-[600px]">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
+      <p className="text-xl text-gray-600">Loading problems...</p>
+    </div>
+  </div>
+);
+
+/**
+ * Displays an error message if something goes wrong
+ */
+export const ErrorView: React.FC<{ error: string, onReturnHome: () => void }> = ({ 
+  error, 
+  onReturnHome 
+}) => (
+  <div className="flex flex-col items-center justify-center min-h-[600px] gap-4">
+    <div className="w-16 h-16 text-red-500 mb-2">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    </div>
+    <p className="text-xl text-red-600">{error}</p>
+    <button
+      onClick={onReturnHome}
+      className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+    >
+      Return to Home
+    </button>
+  </div>
+);
+
+// Export individual components for direct imports
+export default {
+  PauseOverlay,
+  ProgressStats,
+  CompletionMessage,
+  LoadingView,
+  ErrorView
+};
+
+================
+File: src/components/Exercise/types.ts
+================
+/**
+ * Represents a single multiplication problem in the exercise
+ */
+export interface Problem {
+    problemId: number;
+    factor1: number;
+    factor2: number;
+  }
+  
+  /**
+   * Progress statistics for the current exercise session
+   */
+  export interface ProgressStats {
+    totalProblems: number;
+    completed: number;
+    correct: number;
+    incorrect: number;
+    currentProblemIndex: number;
+  }
+
+================
+File: src/components/LandingPage/LandingPage.tsx
+================
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../../services/api';
+
+interface User {
+  id: number;
+  name: string;
+  is_parent: boolean;
+}
+
+const LandingPage: React.FC = () => {
+  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<number | ''>('');
+  const [numberOfProblems, setNumberOfProblems] = useState<number>(10);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const fetchedUsers = await api.getUsers();
+        setUsers(fetchedUsers);
+        setIsLoading(false);
+      } catch (err: unknown) {
+        console.error('Error fetching users:', err);
+        setError('Failed to load users. Please try again.');
+        setIsLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUserId) {
+      setError('Please select a user');
+      return;
+    }
+
+    try {
+      const session = await api.createSession(Number(selectedUserId), numberOfProblems);
+      navigate(`/exercise/${session.id}`);
+      } catch (err: unknown) {
+        console.error('Error creating session:', err);
+      setError('Failed to start exercise session. Please try again.');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-xl text-gray-600">Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full">
+        <h1 className="text-3xl font-bold text-gray-800 mb-6 text-center">
+          Math Practice
+        </h1>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label htmlFor="user" className="block text-sm font-medium text-gray-700 mb-2">
+              Select User
+            </label>
+            <select
+              id="user"
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value ? Number(e.target.value) : '')}
+              className="block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Choose a user</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="problems" className="block text-sm font-medium text-gray-700 mb-2">
+              Number of Problems
+            </label>
+            <input
+              type="number"
+              id="problems"
+              min="1"
+              max="50"
+              value={numberOfProblems}
+              onChange={(e) => setNumberOfProblems(Math.max(1, Math.min(50, Number(e.target.value))))}
+              className="block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors duration-200"
+          >
+            Start Practice
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default LandingPage;
+
+================
+File: src/components/NumericKeyboard/NumericKeyboard.tsx
+================
+import React, { useCallback, useEffect } from 'react';
+
+interface NumericKeyboardProps {
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit?: () => void;
+  maxLength?: number;
+  className?: string;
+}
+
+const NumericKeyboard: React.FC<NumericKeyboardProps> = ({
+  value,
+  onChange,
+  onSubmit,
+  maxLength,
+  className = '',
+}) => {
+  const handleInput = useCallback((input: string) => {
+    // Handle backspace
+    if (input === 'backspace') {
+      if (value === '0' || value.length <= 1) {
+        onChange('0');
+      } else {
+        onChange(value.slice(0, -1));
+      }
+      return;
+    }
+
+    // Don't exceed maxLength
+    if (maxLength && value.length >= maxLength) {
+      return;
+    }
+
+    // Handle digit input
+    if (value === '0') {
+      if (input === '0') {
+        return; // Prevent multiple leading zeros
+      }
+      onChange(input); // Replace initial zero
+    } else {
+      onChange(value + input); // Append digit
+    }
+  }, [value, onChange, maxLength]);
+
+  // Handle keyboard input
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') {
+        handleInput(e.key);
+      } else if (e.key === 'Backspace') {
+        handleInput('backspace');
+      } else if (e.key === 'Enter' && onSubmit) {
+        onSubmit();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleInput, onSubmit]);
+
+  const buttons = [
+    ['7', '8', '9'],
+    ['4', '5', '6'],
+    ['1', '2', '3'],
+    ['0', 'backspace']
+  ];
+
+  const baseButtonStyles = `
+    flex items-center justify-center
+    text-2xl font-bold
+    rounded-xl
+    transition-colors duration-150
+    focus:outline-none focus:ring-2 focus:ring-blue-400
+    active:scale-95
+    touch-manipulation
+    select-none
+    h-12 sm:h-14 md:h-16
+  `;
+
+  const numberButtonStyles = `
+    bg-blue-100 hover:bg-blue-200
+    text-blue-900
+    active:bg-blue-300
+  `;
+
+  const backspaceButtonStyles = `
+    bg-red-100 hover:bg-red-200
+    text-red-900
+    active:bg-red-300
+    col-span-2
+  `;
+
+  return (
+    <div 
+      className={`grid grid-cols-3 gap-2 p-3 bg-white rounded-2xl shadow-lg ${className}`}
+      role="group"
+      aria-label="Numeric keyboard"
+    >
+      {buttons.map((row, rowIndex) => (
+        <React.Fragment key={rowIndex}>
+          {row.map((digit) => (
+            <button
+              key={digit}
+              onClick={() => handleInput(digit)}
+              className={`
+                ${baseButtonStyles}
+                ${digit === 'backspace' ? backspaceButtonStyles : numberButtonStyles}
+                text-lg sm:text-xl md:text-2xl
+              `}
+              aria-label={digit === 'backspace' ? 'Backspace' : `Number ${digit}`}
+              role={digit === 'backspace' ? 'button' : 'spinbutton'}
+            >
+              {digit === 'backspace' ? (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5 sm:h-6 sm:w-6 md:h-7 md:w-7"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414-6.414a2 2 0 012.828 0L21 14"
+                  />
+                </svg>
+              ) : (
+                digit
+              )}
+            </button>
+          ))}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
+
+export default NumericKeyboard;
+
+================
+File: src/components/ProblemDisplay/ProblemDisplay.tsx
+================
+import React from 'react';
+
+interface ProblemDisplayProps {
+  factor1: number;
+  factor2: number;
+  answer: string;
+  className?: string;
+}
+
+const ProblemDisplay: React.FC<ProblemDisplayProps> = ({ 
+  factor1, 
+  factor2,
+  answer,
+  className = '' 
+}) => {
+  // Validate prop ranges
+  if (factor1 < 2 || factor1 > 10 || factor2 < 2 || factor2 > 10) {
+    throw new Error('Factors must be between 2 and 10');
+  }
+
+  return (
+    <div 
+      className={`
+        flex items-center justify-center
+        min-h-[200px] w-full
+        bg-white rounded-lg shadow-sm
+        ${className}
+      `}
+      role="region"
+      aria-label="multiplication problem"
+    >
+      <p 
+        className={`
+          font-semibold text-gray-800 tracking-wide font-['Arial']
+          ${className.includes('text-') ? '' : 'text-5xl md:text-6xl'}
+        `}
+      >
+        <span className="inline-block min-w-[1.5ch] text-center">{factor1}</span>
+        <span className="mx-4 text-gray-600"> × </span>
+        <span className="inline-block min-w-[1.5ch] text-center">{factor2}</span>
+        <span className="mx-4">=</span>
+        <span className="inline-block min-w-[3ch] text-center text-blue-600">
+          {answer !== '0' ? answer : ''}
+        </span>
+      </p>
+    </div>
+  );
+};
+
+export default ProblemDisplay;
+
+================
+File: src/components/ProgressIndicator/ProgressIndicator.tsx
+================
+import React from 'react';
+import clsx from 'clsx';
+
+interface ProgressIndicatorProps {
+  totalProblems: number;
+  currentProblemIndex: number;
+  results: Array<boolean | null>;
+  isRetry?: boolean;
+  className?: string;
+}
+
+const ProgressIndicator: React.FC<ProgressIndicatorProps> = ({
+  totalProblems,
+  currentProblemIndex,
+  results,
+  isRetry = false,
+  className = '',
+}) => {
+  // Validate and normalize inputs
+  const normalizedIndex = Math.max(0, Math.min(currentProblemIndex, totalProblems - 1));
+  const normalizedResults = results.slice(0, totalProblems);
+  while (normalizedResults.length < totalProblems) {
+    normalizedResults.push(null);
+  }
+
+  return (
+    <div
+      className={clsx(
+        'flex justify-center w-full gap-0',
+        className
+      )}
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={totalProblems}
+      aria-valuenow={currentProblemIndex + 1}
+      aria-label={`Problem ${currentProblemIndex + 1} of ${totalProblems}`}
+    >
+      <div className="flex w-full max-w-3xl">
+        {normalizedResults.map((result, index) => {
+          const isCurrent = index === normalizedIndex;
+          const baseColors = {
+            null: 'bg-gray-200',
+            true: 'bg-green-500',
+            false: 'bg-red-500',
+          };
+          const retryColors = {
+            null: 'bg-gray-100',
+            true: 'bg-green-300',
+            false: 'bg-red-300',
+          };
+          
+          const colors = isRetry ? retryColors : baseColors;
+          
+          return (
+            <div
+              key={index}
+              className={clsx(
+                'aspect-square w-full min-w-[24px] transition-colors',
+                colors[`${result}`],
+                isCurrent && 'ring-2 ring-blue-500 ring-inset',
+                // Add subtle patterns for colorblind accessibility
+                result === true && 'bg-[url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 0h20v20H0V0zm2 2v16h16V2H2z\' fill=\'rgba(255,255,255,0.1)\'/%3E%3C/svg%3E")]',
+                result === false && 'bg-[url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 0l20 20M20 0L0 20\' stroke=\'rgba(255,255,255,0.1)\' stroke-width=\'2\'/%3E%3C/svg%3E")]'
+              )}
+              role="status"
+              aria-label={
+                isCurrent
+                  ? `Current problem ${index + 1}`
+                  : `Problem ${index + 1}: ${
+                      result === null
+                        ? 'not attempted'
+                        : result
+                        ? 'correct'
+                        : 'incorrect'
+                    }`
+              }
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default ProgressIndicator;
+
+================
+File: src/components/SessionSummary/utils/calculations.ts
+================
+import { SessionSummary } from "@/services/api";
+
+
+export interface SessionStats {
+  correctCount: number;
+  totalCount: number;
+  correctPercentage: number;
+  avgResponseTime: number;
+  fastestTime: number;
+  slowestTime: number;
+  needsMostPractice: string;
+}
+
+/**
+ * Calculate summary statistics from session data
+ */
+export const calculateSessionStats = (summary: SessionSummary): SessionStats => {
+  const correctCount = summary.attempts.filter(a => a.isCorrect).length;
+  const totalCount = summary.attempts.length;
+  const correctPercentage = Math.round((correctCount / totalCount) * 100);
+  
+  const responseTimes = summary.attempts.map(a => a.responseTime);
+  const avgResponseTime = responseTimes.reduce((sum, time) => sum + time, 0) / responseTimes.length;
+  
+  const fastestTime = Math.min(...responseTimes);
+  const slowestTime = Math.max(...responseTimes);
+  
+  // Get problem with highest weight (needs most practice)
+  const highestWeightProblem = [...summary.problemWeights].sort((a, b) => b.weight - a.weight)[0];
+  
+  return {
+    correctCount,
+    totalCount,
+    correctPercentage,
+    avgResponseTime: Math.round(avgResponseTime),
+    fastestTime: Math.round(fastestTime),
+    slowestTime: Math.round(slowestTime),
+    needsMostPractice: highestWeightProblem ? 
+      `${highestWeightProblem.factor1} × ${highestWeightProblem.factor2}` : 
+      'None'
+  };
+};
+
+================
+File: src/components/SessionSummary/utils/formatters.ts
+================
+// Utility functions for formatting data
+
+/**
+ * Format milliseconds to seconds with one decimal place
+ */
+export const formatTime = (ms: number): string => {
+    return (ms / 1000).toFixed(1) + 's';
+  };
+  
+  /**
+   * Get color for response time comparison to average
+   */
+  export const getTimeComparisonColor = (actual: number, average: number | null): string => {
+    if (!average) return 'text-gray-500';
+    
+    const diff = actual - average;
+    const percentDiff = (diff / average) * 100;
+    
+    if (percentDiff < -20) return 'text-green-600'; // Much faster
+    if (percentDiff < -5) return 'text-green-500'; // Faster
+    if (percentDiff < 5) return 'text-gray-600'; // About average
+    if (percentDiff < 20) return 'text-yellow-500'; // Slower
+    return 'text-red-500'; // Much slower
+  };
+  
+/**
+ * Get color based on weight relative to default weight
+ * Lower weights (below default) indicate mastery (green)
+ * Higher weights (above default) indicate need for practice (red)
+ */
+export const getWeightColor = (weight: number): string => {
+  // The default weight for a new problem is 10
+  const defaultWeight = 10;
+  const maxIntensity = 0.9; // Maximum color intensity (0-1)
+  
+  if (weight === defaultWeight) return 'rgb(229, 231, 235)'; // gray-200 equivalent for neutral
+  
+  const diff = weight - defaultWeight;
+  const normalizedDiff = Math.min(Math.abs(diff) / defaultWeight, 1);
+  // Use logarithmic scale for better visualization of small differences
+  const intensity = Math.min(maxIntensity * Math.log10(1 + normalizedDiff * 9), maxIntensity);
+  
+  if (diff > 0) {
+    // Red spectrum for weights above default (needs more practice)
+    return `rgba(239, 68, 68, ${intensity})`; // red-500 with variable opacity
+  } else {
+    // Green spectrum for weights below default (mastered)
+    return `rgba(34, 197, 94, ${intensity})`; // green-500 with variable opacity
+  }
+};
+  
+  /**
+   * Calculate relative speed indicator position (0-100)
+   */
+  export const getSpeedPosition = (responseTime: number, averageTime: number | null): number => {
+    if (!averageTime) return 50; // Center if no average
+    const diff = responseTime - averageTime;
+    const maxDiff = averageTime; // Use average as scale
+    const position = 50 - (diff / maxDiff) * 50;
+    return Math.max(5, Math.min(95, position)); // Keep within visible range
+  };
+
+================
+File: src/components/SessionSummary/MasteryGrid.tsx
+================
+import React from 'react';
+import { ProblemWeight } from '../../services/api';
+import { getWeightColor } from './utils/formatters';
+
+interface MasteryGridProps {
+  problemWeights: ProblemWeight[];
+}
+
+const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
+  return (
+    <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
+      <h3 className="text-xl font-semibold text-gray-800 mb-2">Problem Mastery</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Green indicates mastery, gray is neutral, and red indicates need for more practice.
+      </p>
+      
+      <div className="grid grid-cols-10 gap-px bg-gray-100 p-2 rounded-lg">
+        {/* Column headers */}
+        <div className="text-center font-medium text-gray-600 p-1 bg-gray-50 rounded-sm">×</div>
+        {[2,3,4,5,6,7,8,9,10].map(num => (
+          <div key={num} className="text-center font-medium text-gray-600 p-1 bg-gray-50 rounded-sm">
+            {num}
+          </div>
+        ))}
+        
+        {/* Grid rows */}
+        {[2,3,4,5,6,7,8,9,10].map(row => (
+          <React.Fragment key={row}>
+            {/* Row header */}
+            <div className="text-center font-medium text-gray-600 p-1 bg-gray-50 rounded-sm">
+              {row}
+            </div>
+            
+            {/* Cells */}
+            {[2,3,4,5,6,7,8,9,10].map(col => {
+              // Find the weight for this problem combination
+              const weight = problemWeights.find(
+                w => (w.factor1 === row && w.factor2 === col) ||
+                     (w.factor1 === col && w.factor2 === row)
+              );
+              
+              // Use default weight (10) if no data available
+              const cellColor = weight ? getWeightColor(weight.weight) : 'rgb(229, 231, 235)';
+              const product = row * col;
+              
+              // Create descriptive tooltip text
+              let masteryStatus = 'No practice data yet';
+              if (weight) {
+                if (weight.weight < 5) masteryStatus = 'Well mastered';
+                else if (weight.weight < 8) masteryStatus = 'Good progress';
+                else if (weight.weight < 12) masteryStatus = 'Still learning';
+                else if (weight.weight < 16) masteryStatus = 'Needs practice';
+                else masteryStatus = 'Needs focused attention';
+              }
+              
+              const tooltipText = `${row} × ${col} = ${product}\n${masteryStatus}${weight ? ` (weight: ${weight.weight.toFixed(1)})` : ''}`;
+              
+              return (
+                <div
+                  key={`${row}-${col}`}
+                  className="relative w-full pb-[100%] rounded-sm hover:opacity-75 transition-opacity cursor-help"
+                  style={{ backgroundColor: cellColor }}
+                  title={tooltipText}
+                >
+                  <div className="absolute inset-0 flex items-center justify-center text-xs font-medium text-gray-700">
+                    {product}
+                  </div>
+                  
+                  {/* Visual indicators for high-priority problems */}
+                  {weight && weight.weight > 15 && (
+                    <div className="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full" 
+                         title="High priority for practice"/>
+                  )}
+                  
+                  {/* Visual indicators for mastered problems */}
+                  {weight && weight.weight < 5 && (
+                    <div className="absolute bottom-0 right-0 h-2 w-2 bg-green-500 rounded-full"
+                         title="Well mastered"/>
+                  )}
+                </div>
+              );
+            })}
+          </React.Fragment>
+        ))}
+      </div>
+      
+      {/* Legend with clearer description */}
+      <div className="flex justify-center gap-6 mt-4 text-sm">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: getWeightColor(5) }}></div>
+          <span>Mastered</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-sm bg-gray-200"></div>
+          <span>Neutral</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: getWeightColor(15) }}></div>
+          <span>Needs practice</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default MasteryGrid;
+
+================
+File: src/components/SessionSummary/PerformanceInsights.tsx
+================
+import React from 'react';
+import { SessionStats } from './utils/calculations';
+
+interface PerformanceInsightsProps {
+  stats: SessionStats;
+}
+
+const PerformanceInsights: React.FC<PerformanceInsightsProps> = ({ stats }) => {
+  return (
+    <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
+      <h3 className="text-xl font-semibold text-gray-800 mb-3">Performance Insights</h3>
+      
+      <ul className="space-y-2 pl-2">
+        {/* Dynamically generated insights */}
+        {stats.correctPercentage < 70 && (
+          <li className="flex items-start gap-2 text-red-800 bg-red-50 p-2 rounded">
+            <svg className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span>Accuracy below 70%. Focus on getting correct answers before speed.</span>
+          </li>
+        )}
+        
+        {stats.correctPercentage >= 90 && (
+          <li className="flex items-start gap-2 text-green-800 bg-green-50 p-2 rounded">
+            <svg className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Great accuracy! Try improving your speed next.</span>
+          </li>
+        )}
+        
+        {stats.slowestTime > stats.avgResponseTime * 2 && (
+          <li className="flex items-start gap-2 text-amber-800 bg-amber-50 p-2 rounded">
+            <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Some problems take much longer than others. Practice consistency.</span>
+          </li>
+        )}
+        
+        <li className="flex items-start gap-2 text-blue-800 bg-blue-50 p-2 rounded">
+          <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>Focus practice on: <strong>{stats.needsMostPractice}</strong></span>
+        </li>
+      </ul>
+    </div>
+  );
+};
+
+export default PerformanceInsights;
+
+================
+File: src/components/SessionSummary/ProblemList.tsx
+================
+import React from 'react';
+import { ProblemAttempt } from '../../services/api';
+import { formatTime, getTimeComparisonColor, getSpeedPosition } from './utils/formatters';
+
+interface ProblemListProps {
+  attempts: ProblemAttempt[];
+}
+
+const ProblemList: React.FC<ProblemListProps> = ({ attempts }) => {
+  return (
+    <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
+      <h3 className="text-xl font-semibold text-gray-800 mb-4">Problems Attempted</h3>
+      
+      <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+        {attempts.map((attempt, index) => {
+          const correctAnswer = attempt.factor1 * attempt.factor2;
+          const isCorrect = attempt.isCorrect;
+          
+          return (
+            <div 
+              key={index} 
+              className={`
+                flex items-center gap-4 p-3 rounded-lg border 
+                ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}
+                transition-all hover:shadow-md
+              `}
+            >
+              <div className="flex-shrink-0 w-7 h-7 flex items-center justify-center rounded-full bg-white border border-gray-200">
+                <span className="text-sm font-medium text-gray-700">{index + 1}</span>
+              </div>
+              
+              <div className="flex items-center gap-2 flex-1">
+                <span className="text-lg font-medium whitespace-nowrap">
+                  {attempt.factor1} × {attempt.factor2} =
+                </span>
+                
+                {isCorrect ? (
+                  <span className="text-lg font-semibold text-green-700">
+                    {correctAnswer}
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <span className="text-lg font-semibold text-red-600 line-through">
+                      {attempt.userAnswer}
+                    </span>
+                    <span className="text-gray-500 text-sm">(should be {correctAnswer})</span>
+                  </div>
+                )}
+              </div>
+              
+              {/* Response time indicator */}
+              <div className="flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    <div className={`text-sm font-medium ${getTimeComparisonColor(attempt.responseTime, attempt.averageTime)}`}>
+                      {formatTime(attempt.responseTime)}
+                    </div>
+                    
+                    {attempt.averageTime && (
+                      <div className="text-xs text-gray-500">
+                        {attempt.responseTime < attempt.averageTime ? 'Faster' : 'Slower'} than avg
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Speed gauge */}
+                  <div 
+                    className="relative w-16 h-3 bg-gray-200 rounded-full overflow-hidden flex-shrink-0"
+                    title={`Response time: ${formatTime(attempt.responseTime)}${attempt.averageTime ? `, Average: ${formatTime(attempt.averageTime)}` : ''}`}
+                  >
+                    {attempt.averageTime && (
+                      <div 
+                        className="absolute top-0 bottom-0 w-0.5 bg-gray-600"
+                        style={{ left: '50%' }}
+                      />
+                    )}
+                    <div
+                      className={`absolute top-0 bottom-0 w-2 rounded-full ${
+                        attempt.responseTime < (attempt.averageTime || attempt.responseTime) 
+                          ? 'bg-green-500' 
+                          : 'bg-red-500'
+                      }`}
+                      style={{
+                        left: `${getSpeedPosition(attempt.responseTime, attempt.averageTime)}%`,
+                        transform: 'translateX(-50%)'
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default ProblemList;
+
+================
+File: src/components/SessionSummary/SessionSummary.tsx
+================
+import React, { useMemo } from 'react';
+import { SessionSummary as SessionSummaryType } from '../../services/api';
+import StatsSummary from './StatsSummary';
+import ProblemList from './ProblemList';
+import MasteryGrid from './MasteryGrid';
+import PerformanceInsights from './PerformanceInsights';
+import { calculateSessionStats } from './utils/calculations';
+
+interface Props {
+  summary: SessionSummaryType;
+  className?: string;
+}
+
+/**
+ * SessionSummary component shows a comprehensive summary of an exercise session
+ * including statistics, problem list, mastery grid, and performance insights.
+ */
+const SessionSummary: React.FC<Props> = ({ summary, className = '' }) => {
+  // Calculate summary statistics
+  const stats = useMemo(() => calculateSessionStats(summary), [summary]);
+
+  return (
+    <div className={`grid grid-cols-1 lg:grid-cols-2 gap-8 w-full max-w-6xl mx-auto p-4 ${className}`}>
+      {/* Left Column: Stats and Problem List */}
+      <div className="space-y-6">
+        <StatsSummary stats={stats} />
+        <ProblemList attempts={summary.attempts} />
+      </div>
+
+      {/* Right Column: Multiplication Grid and Insights */}
+      <div className="space-y-6">
+        <MasteryGrid problemWeights={summary.problemWeights} />
+        <PerformanceInsights stats={stats} />
+      </div>
+    </div>
+  );
+};
+
+export default SessionSummary;
+
+================
+File: src/components/SessionSummary/StatsSummary.tsx
+================
+import React from 'react';
+import { SessionStats } from './utils/calculations';
+import { formatTime } from './utils/formatters';
+
+interface StatsSummaryProps {
+  stats: SessionStats;
+}
+
+const StatsSummary: React.FC<StatsSummaryProps> = ({ stats }) => {
+  return (
+    <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
+      <h3 className="text-xl font-semibold text-gray-800 mb-4">Session Statistics</h3>
+      
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-blue-50 rounded-lg p-3">
+          <div className="text-sm text-blue-600 font-medium">Accuracy</div>
+          <div className="flex items-end gap-1 mt-1">
+            <span className="text-2xl font-bold text-blue-800">{stats.correctPercentage}%</span>
+            <span className="text-sm text-blue-600 font-medium mb-0.5">
+              ({stats.correctCount}/{stats.totalCount})
+            </span>
+          </div>
+        </div>
+        
+        <div className="bg-purple-50 rounded-lg p-3">
+          <div className="text-sm text-purple-600 font-medium">Avg Response</div>
+          <div className="flex items-end gap-1 mt-1">
+            <span className="text-2xl font-bold text-purple-800">{formatTime(stats.avgResponseTime)}</span>
+          </div>
+        </div>
+        
+        <div className="bg-green-50 rounded-lg p-3">
+          <div className="text-sm text-green-600 font-medium">Fastest</div>
+          <div className="text-2xl font-bold text-green-800">{formatTime(stats.fastestTime)}</div>
+        </div>
+        
+        <div className="bg-amber-50 rounded-lg p-3">
+          <div className="text-sm text-amber-600 font-medium">Needs Practice</div>
+          <div className="text-2xl font-bold text-amber-800">{stats.needsMostPractice}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default StatsSummary;
+
+================
+File: src/context/ExerciseContext/ExerciseContext.tsx
+================
+import React, { createContext, useReducer, useCallback, useEffect, useMemo } from 'react';
+import { ExerciseState, ExerciseAction, ExerciseContextValue, ExerciseProviderProps, Problem } from './types';
+
+const LOCAL_STORAGE_KEY = 'exerciseState';
+
+const generateProblem = (minFactor: number, maxFactor: number, previousProblems: Problem[] = []): Problem => {
+  let factor1: number, factor2: number;
+  do {
+    factor1 = Math.floor(Math.random() * (maxFactor - minFactor + 1)) + minFactor;
+    factor2 = Math.floor(Math.random() * (maxFactor - minFactor + 1)) + minFactor;
+  } while (
+    previousProblems.length > 0 &&
+    previousProblems[previousProblems.length - 1].factor1 === factor1 &&
+    previousProblems[previousProblems.length - 1].factor2 === factor2
+  );
+
+  return {
+    factor1,
+    factor2,
+    answer: factor1 * factor2
+  };
+};
+
+const generateProblems = (count: number, minFactor: number, maxFactor: number): Problem[] => {
+  const problems: Problem[] = [];
+  for (let i = 0; i < count; i++) {
+    problems.push(generateProblem(minFactor, maxFactor, problems));
+  }
+  return problems;
+};
+
+const createInitialState = (numberOfProblems: number, minFactor: number, maxFactor: number): ExerciseState => {
+  return {
+    problems: generateProblems(numberOfProblems, minFactor, maxFactor),
+    currentIndex: 0,
+    currentAnswer: '',
+    isComplete: false,
+    isPaused: false,
+    isRetryMode: false,
+    results: new Array(numberOfProblems).fill(null),
+    startTime: Date.now(),
+    problemStartTime: Date.now()
+  };
+};
+
+const exerciseReducer = (state: ExerciseState, action: ExerciseAction): ExerciseState => {
+  switch (action.type) {
+    case 'SET_ANSWER':
+      return {
+        ...state,
+        currentAnswer: action.payload
+      };
+
+    case 'SUBMIT_ANSWER': {
+      const currentProblem = state.problems[state.currentIndex];
+      const isCorrect = parseInt(state.currentAnswer) === currentProblem.answer;
+      const newResults = [...state.results];
+      newResults[state.currentIndex] = isCorrect;
+      
+      return {
+        ...state,
+        results: newResults,
+        isRetryMode: !isCorrect,
+        currentAnswer: '',
+        isComplete: state.currentIndex === state.problems.length - 1 && isCorrect,
+        problemStartTime: Date.now()
+      };
+    }
+
+    case 'NEXT_PROBLEM': {
+      const nextIndex = state.currentIndex + 1;
+      return {
+        ...state,
+        currentIndex: Math.min(nextIndex, state.problems.length - 1),
+        currentAnswer: '',
+        isRetryMode: false,
+        problemStartTime: Date.now()
+      };
+    }
+
+    case 'TOGGLE_PAUSE':
+      return {
+        ...state,
+        isPaused: !state.isPaused,
+        problemStartTime: !state.isPaused ? Date.now() : state.problemStartTime
+      };
+
+    case 'RESTART_EXERCISE':
+      return {
+        ...state,
+        currentIndex: 0,
+        currentAnswer: '',
+        isComplete: false,
+        isPaused: false,
+        isRetryMode: false,
+        results: new Array(state.problems.length).fill(null),
+        startTime: Date.now(),
+        problemStartTime: Date.now()
+      };
+
+    default:
+      return state;
+  }
+};
+
+export const ExerciseContext = createContext<ExerciseContextValue | null>(null);
+
+if (process.env.NODE_ENV === 'development') {
+  ExerciseContext.displayName = 'ExerciseContext';
+}
+
+export const ExerciseProvider: React.FC<ExerciseProviderProps> = ({
+  numberOfProblems,
+  minFactor = 2,
+  maxFactor = 10,
+  children
+}) => {
+  const [state, dispatch] = useReducer(
+    exerciseReducer,
+    { numberOfProblems, minFactor, maxFactor },
+    () => {
+      const savedState = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (savedState) {
+        const parsedState = JSON.parse(savedState);
+        if (!parsedState.isComplete) {
+          return {
+            ...parsedState,
+            startTime: Date.now(),
+            problemStartTime: Date.now()
+          };
+        }
+      }
+      return createInitialState(numberOfProblems, minFactor, maxFactor);
+    }
+  );
+
+  useEffect(() => {
+    if (state.isComplete) {
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
+    } else {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+    }
+  }, [state]);
+
+  const setAnswer = useCallback((value: string) => {
+    dispatch({ type: 'SET_ANSWER', payload: value });
+  }, []);
+
+  const submitAnswer = useCallback(() => {
+    dispatch({ type: 'SUBMIT_ANSWER' });
+  }, []);
+
+  const nextProblem = useCallback(() => {
+    dispatch({ type: 'NEXT_PROBLEM' });
+  }, []);
+
+  const togglePause = useCallback(() => {
+    dispatch({ type: 'TOGGLE_PAUSE' });
+  }, []);
+
+  const restartExercise = useCallback(() => {
+    dispatch({ type: 'RESTART_EXERCISE' });
+  }, []);
+
+  const contextValue = useMemo<ExerciseContextValue>(() => {
+    // Get current time inside the memo to ensure it updates
+    const now = Date.now();
+    return {
+      state,
+      setAnswer,
+      submitAnswer,
+      nextProblem,
+      togglePause,
+      restartExercise,
+      isLastProblem: state.currentIndex === state.problems.length - 1,
+      currentProblem: state.problems[state.currentIndex],
+      percentComplete: (state.results.filter(result => result !== null).length / state.problems.length) * 100,
+      timeElapsed: now - state.startTime
+    };
+  }, [
+    state,
+    setAnswer,
+    submitAnswer,
+    nextProblem,
+    togglePause,
+    restartExercise
+  ]);
+
+  return (
+    <ExerciseContext.Provider value={contextValue}>
+      {children}
+    </ExerciseContext.Provider>
+  );
+};
+
+================
+File: src/context/ExerciseContext/types.ts
+================
+export interface Problem {
+  factor1: number;
+  factor2: number;
+  answer: number;
+}
+
+export interface ExerciseState {
+  problems: Problem[];
+  currentIndex: number;
+  currentAnswer: string;
+  isComplete: boolean;
+  isPaused: boolean;
+  isRetryMode: boolean;
+  results: boolean[];
+  startTime: number;
+  problemStartTime: number;
+}
+
+export type ExerciseAction =
+  | { type: 'SET_ANSWER'; payload: string }
+  | { type: 'SUBMIT_ANSWER' }
+  | { type: 'NEXT_PROBLEM' }
+  | { type: 'TOGGLE_PAUSE' }
+  | { type: 'RESTART_EXERCISE' };
+
+export interface ExerciseContextValue {
+  state: ExerciseState;
+  setAnswer: (value: string) => void;
+  submitAnswer: () => void;
+  nextProblem: () => void;
+  togglePause: () => void;
+  restartExercise: () => void;
+  isLastProblem: boolean;
+  currentProblem: Problem;
+  percentComplete: number;
+  timeElapsed: number;
+}
+
+export interface ExerciseProviderProps {
+  numberOfProblems: number;
+  minFactor?: number;
+  maxFactor?: number;
+  children: React.ReactNode;
+}
+
+================
+File: src/context/ExerciseContext/useExercise.ts
+================
+import { useContext } from 'react';
+import { ExerciseContext } from './ExerciseContext';
+import { ExerciseContextValue } from './types';
+
+export const useExercise = (): ExerciseContextValue => {
+  const context = useContext(ExerciseContext);
+  
+  if (!context) {
+    throw new Error(
+      'useExercise must be used within an ExerciseProvider. ' +
+      'Wrap a parent component in <ExerciseProvider> to fix this error.'
+    );
+  }
+  
+  return context;
+};
+
+// Export the provider for convenience
+export { ExerciseProvider } from './ExerciseContext';
+
+================
+File: src/services/api.ts
+================
+// src/services/api.ts
+
+export interface User {
+  id: number;
+  name: string;
+  is_parent: boolean;
+}
+
+export interface ExerciseSession {
+  id: number;
+  user_id: number;
+  total_problems: number;
+  completed_problems: number;
+  is_completed: boolean;
+  start_time: string;
+  end_time?: string;
+}
+
+export interface Problem {
+  problemId: number;
+  factor1: number;
+  factor2: number;
+}
+
+export interface ProblemAttempt {
+  factor1: number;
+  factor2: number;
+  isCorrect: boolean;
+  responseTime: number;
+  averageTime: number | null;
+  userAnswer: number;
+}
+
+export interface ProblemWeight {
+  factor1: number;
+  factor2: number;
+  weight: number;
+}
+
+export interface SessionStats {
+  totalProblems: number;
+  correctAnswers: number;
+  accuracy: number;
+  averageResponseTime: number;
+  completedAt: string;
+}
+
+export interface SessionSummary {
+  attempts: ProblemAttempt[];
+  problemWeights: ProblemWeight[];
+  sessionStats: SessionStats;
+}
+
+export interface AttemptResult {
+  isCorrect: boolean;
+  correctAnswer: number;
+  isSessionComplete: boolean;
+  sessionSummary?: SessionSummary;
+}
+
+const API_BASE_URL = 'http://localhost:3001/api';
+
+export const api = {
+  // Users
+  async getUsers(): Promise<User[]> {
+    const response = await fetch(`${API_BASE_URL}/users`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch users');
+    }
+    return response.json();
+  },
+
+  // Sessions
+  async createSession(userId: number, totalProblems: number): Promise<ExerciseSession> {
+    const response = await fetch(`${API_BASE_URL}/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId, totalProblems }),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create session');
+    }
+    return response.json();
+  },
+
+  async getNextProblem(sessionId: number): Promise<Problem> {
+    const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/problems/next`);
+    if (!response.ok) {
+      const errorData = await response.json();
+      // Check if session is already completed
+      if (errorData.error === 'Session is completed') {
+        throw new Error('Session is already completed');
+      }
+      throw new Error('Failed to fetch next problem');
+    }
+    return response.json();
+  },
+
+  async getSession(sessionId: number): Promise<ExerciseSession> {
+    const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch session');
+    }
+    return response.json();
+  },
+
+  async submitAttempt(
+    sessionId: number,
+    problemId: number,
+    answer: number,
+    responseTimeMs: number
+  ): Promise<AttemptResult> {
+    const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/attempts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ problemId, answer, responseTimeMs }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      if (errorData.error === 'Session is already completed') {
+        throw new Error('Session is already completed');
+      }
+      throw new Error('Failed to submit attempt');
+    }
+    
+    return response.json();
+  },
+  
+  // Helper method to get difficulty label based on weight
+  getDifficultyLabel(weight: number): string {
+    if (weight <= 5) return 'Mastered';
+    if (weight <= 8) return 'Confident';
+    if (weight <= 12) return 'Learning';
+    if (weight <= 16) return 'Challenging';
+    return 'Difficult';
+  }
+};
+
+================
+File: src/test/setup.ts
+================
+import '@testing-library/jest-dom'
+
+================
+File: src/types/index.ts
+================
+export interface Problem {
+  id: string;
+  factor1: number;
+  factor2: number;
+  answer?: number;
+  isCorrect?: boolean;
+  timeSpent?: number;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  isParent: boolean;
+}
+
+================
+File: src/App.css
+================
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+================
+File: src/App.tsx
+================
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import LandingPage from './components/LandingPage/LandingPage';
+import Exercise from './components/Exercise/Exercise';
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route 
+          path="/exercise/:sessionId" 
+          element={<Exercise />} 
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+export default App;
+
+================
+File: src/index.css
+================
+@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+html {
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: auto;
+}
+
+#root {
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+================
+File: src/main.tsx
+================
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+================
+File: src/vite-env.d.ts
+================
+/// <reference types="vite/client" />
+
+================
+File: .dockerignore
+================
+node_modules
+.git
+.gitignore
+README.md
+.env
+*.log
+dist
+build
+coverage
+.vscode
+.idea
+.DS_Store
+
+================
+File: .gitignore
+================
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+================
+File: Dockerfile
+================
+# Stage 1: Build the React application
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build the application using Vite (which handles TypeScript compilation)
+RUN npm run build
+
+# Stage 2: Serve the built application
+FROM nginx:alpine
+
+# Copy the built files from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy custom nginx config if needed
+# COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose port 80
+EXPOSE 80
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
+
+================
+File: eslint.config.js
+================
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+
+export default tseslint.config(
+  { ignores: ['dist'] },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+    },
+  },
+)
+
+================
+File: index.html
+================
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + React + TS</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+================
+File: package.json
+================
+{
+  "name": "math-practice-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"cd backend && npm run dev\"",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.0.8",
+    "clsx": "^2.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.13.5",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.19.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.18",
+    "globals": "^15.14.0",
+    "jsdom": "^26.0.0",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^4.0.8",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.22.0",
+    "vite": "^6.1.0",
+    "vitest": "^3.0.6"
+  }
+}
+
+================
+File: README.md
+================
+# Math Practice App
+
+An interactive web application designed to help children practice multiplication tables. The app adapts to each child's learning pace and provides detailed progress tracking for parents.
+
+## Features
+
+### Exercise Mode
+- Interactive multiplication practice
+- Customizable problem sets
+- Immediate visual feedback
+- Progress tracking during exercises
+- Adaptive problem selection based on:
+  - Factor difficulty
+  - Past performance
+  - Problem frequency
+- Pause/resume functionality
+- Retry mode for incorrect answers
+
+### Review Mode
+- Detailed performance statistics
+- Individual progress tracking
+- Historical exercise review
+- Performance trends visualization
+- Multiplication table proficiency overview
+
+## Technical Stack
+
+- Frontend: React with TypeScript
+- Styling: Tailwind CSS
+- Build Tool: Vite
+- Testing: Vitest and React Testing Library
+- Containerization: Docker
+- Deployment: Raspberry Pi (local network)
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone [repository-url]
+cd math-practice-app
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Start the development server:
+```bash
+npm run dev
+```
+
+## Project Structure
+
+```
+math-practice-app/
+├── src/
+│   ├── components/
+│   │   ├── Exercise/
+│   │   ├── NumericKeyboard/
+│   │   ├── ProblemDisplay/
+│   │   └── ProgressIndicator/
+│   ├── context/
+│   │   └── ExerciseContext/
+│   ├── hooks/
+│   ├── types/
+│   ├── utils/
+│   └── test/
+├── public/
+└── ...config files
+```
+
+## Component Overview
+
+### ProblemDisplay
+Displays the current multiplication problem with clear, child-friendly typography.
+
+### NumericKeyboard
+Custom on-screen keyboard for answer input, optimized for touch devices.
+
+### ProgressIndicator
+Visual feedback showing exercise progress and correct/incorrect answers.
+
+### Exercise
+Main component combining all elements into a cohesive practice experience.
+
+## Development
+
+### Running Tests
+```bash
+npm run test
+```
+
+### Building for Production
+```bash
+npm run build
+```
+
+### Docker Deployment
+```bash
+# Build the Docker image
+docker build -t math-practice-app .
+
+# Run the container
+docker run -p 3000:3000 math-practice-app
+```
+
+## Usage
+
+1. Select a user from the home screen
+2. Choose Exercise or Review mode
+3. For Exercise mode:
+   - Select number of problems
+   - Complete the exercise set
+   - Review results
+4. For Review mode:
+   - Select a child's profile
+   - View performance statistics
+   - Review past exercises
+
+## Planned Features
+
+- Support for division, addition, and subtraction
+- Multiple difficulty levels
+- Achievement system
+- Multi-language support
+- Visual learning aids
+- Custom exercise creation for parents
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This work is licensed under a Creative Commons Attribution-NonCommercial 4.0 International License.
+This means you are free to:
+
+Share — copy and redistribute the material in any medium or format
+Adapt — remix, transform, and build upon the material
+
+Under the following terms:
+
+Attribution — You must give appropriate credit, provide a link to the license, and indicate if changes were made.
+NonCommercial — You may not use the material for commercial purposes.
+
+See the full license text for more details.
+
+## Authors
+
+Philippe Moore
+
+================
+File: tsconfig.app.json
+================
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src"]
+}
+
+================
+File: tsconfig.json
+================
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
+
+================
+File: tsconfig.node.json
+================
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.ts"]
+}
+
+================
+File: vite.config.ts
+================
+import { defineConfig } from 'vite'
+import { configDefaults } from 'vitest/config'
+import tailwindcss from '@tailwindcss/vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [
+    tailwindcss(),
+    react()
+  ],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    exclude: [...configDefaults.exclude, 'e2e/*'],
+    css: true
+  }
+})
+
+
+
+================================================================
+End of Codebase
+================================================================

@@ -1,14 +1,20 @@
-import './App.css'
-import Exercise from './components/Exercise/Exercise'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import LandingPage from './components/LandingPage/LandingPage';
+import Exercise from './components/Exercise/Exercise';
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-3xl mx-auto">
-        <Exercise numberOfProblems={10} minFactor={2} maxFactor={10} />
-      </div>
-    </div>
-  )
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route 
+          path="/exercise/:sessionId" 
+          element={<Exercise />} 
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
 
-export default App
+export default App;
