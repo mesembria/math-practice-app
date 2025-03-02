@@ -7,13 +7,13 @@ export class ProblemState {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @Column({ name: "user_id" })
+    @Column({ name: "user_id", type: "int" }) // Explicitly define the column type
     userId: number;
 
-    @Column()
+    @Column({ type: "int" }) // Explicitly define the column type
     factor1: number;
 
-    @Column()
+    @Column({ type: "int" }) // Explicitly define the column type
     factor2: number;
 
     @Column({ type: "float", default: 10 })

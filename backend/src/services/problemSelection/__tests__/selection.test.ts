@@ -1,16 +1,30 @@
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import 'reflect-metadata'; // Add this import at the top
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ProblemSelector } from '../selection';
 import { Problem, ProblemHistory, ProblemSelectionConfig, ProblemStateStorage, NormalizedProblem } from '../types';
 
+// Mock the database connection
+vi.mock('../../../config/database', () => ({
+  AppDataSource: {
+    initialize: vi.fn().mockResolvedValue(undefined),
+    destroy: vi.fn().mockResolvedValue(undefined)
+  }
+}));
+
+interface MockProblemState {
+  weight: number;
+  lastSeen: number;
+}
+
 // Mock storage implementation for testing
 class MockStorage implements ProblemStateStorage {
-  private states = new Map<string, { weight: number; lastSeen: number }>();
+  private states = new Map<string, MockProblemState>();
 
   private getKey(userId: number, normalized: NormalizedProblem): string {
     return `${userId}-${normalized.smaller}x${normalized.larger}`;
   }
 
-  getProblemState(userId: number, normalized: NormalizedProblem) {
+  async getProblemState(userId: number, normalized: NormalizedProblem): Promise<MockProblemState> {
     const key = this.getKey(userId, normalized);
     if (!this.states.has(key)) {
       this.states.set(key, {
@@ -21,7 +35,7 @@ class MockStorage implements ProblemStateStorage {
     return this.states.get(key)!;
   }
 
-  updateProblemState(userId: number, normalized: NormalizedProblem, state: { weight: number; lastSeen: number }) {
+  async updateProblemState(userId: number, normalized: NormalizedProblem, state: MockProblemState): Promise<void> {
     const key = this.getKey(userId, normalized);
     this.states.set(key, state);
   }
@@ -36,7 +50,7 @@ describe('Problem Selection System', () => {
   let selector: ProblemSelector;
   let storage: MockStorage;
   let testConfig: ProblemSelectionConfig;
-  let mockRandom: ReturnType<typeof jest.spyOn>;
+  let mockRandom: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     testConfig = {
@@ -50,7 +64,7 @@ describe('Problem Selection System', () => {
     };
     storage = new MockStorage();
     selector = new ProblemSelector(storage);
-    mockRandom = jest.spyOn(Math, 'random');
+    mockRandom = vi.spyOn(Math, 'random');
   });
 
   afterEach(() => {
@@ -58,31 +72,31 @@ describe('Problem Selection System', () => {
   });
 
   describe('Problem Normalization', () => {
-    it('should treat reversed factors as the same problem for weight updates', () => {
+    it('should treat reversed factors as the same problem for weight updates', async () => {
       const userId = 1;
       const problem1: Problem = { factor1: 3, factor2: 4 };
       
       // Update weight for the problem
-      selector.updateProblemAfterAttempt(userId, problem1, false, 3000, testConfig);
+      await selector.updateProblemAfterAttempt(userId, problem1, false, 3000, testConfig);
       
       // Get state for problem2 - should have the same updated weight
       const normalized = { smaller: 3, larger: 4 };
-      const state = storage.getProblemState(userId, normalized);
+      const state = await storage.getProblemState(userId, normalized);
       
       expect(state.weight).toBe(17); // 12 + 5 (weightIncreaseWrong)
     });
 
-    it('should randomize factor order in selected problems', () => {
+    it('should randomize factor order in selected problems', async () => {
       const history: ProblemHistory[] = [];
       
       // Force random to return 0 (smaller first)
       mockRandom.mockReturnValueOnce(0);
-      const selected1 = selector.selectNextProblem(1, history, testConfig);
+      const selected1 = await selector.selectNextProblem(1, history, testConfig);
       expect(selected1.factor1).toBeLessThanOrEqual(selected1.factor2);
       
       // Force random to return 0.9 (larger first)
       mockRandom.mockReturnValueOnce(0.9);
-      const selected2 = selector.selectNextProblem(1, history, testConfig);
+      const selected2 = await selector.selectNextProblem(1, history, testConfig);
       expect(selected2.factor1).toBeGreaterThanOrEqual(selected2.factor2);
     });
   });
@@ -91,38 +105,38 @@ describe('Problem Selection System', () => {
     const userId = 1;
     const problem: Problem = { factor1: 3, factor2: 4 };
 
-    it('should increase weight for wrong answers', () => {
-      selector.updateProblemAfterAttempt(userId, problem, false, 3000, testConfig);
+    it('should increase weight for wrong answers', async () => {
+      await selector.updateProblemAfterAttempt(userId, problem, false, 3000, testConfig);
       
       const normalized = { smaller: 3, larger: 4 };
-      const state = storage.getProblemState(userId, normalized);
+      const state = await storage.getProblemState(userId, normalized);
       expect(state.weight).toBe(17); // 12 + 5 (weightIncreaseWrong)
     });
 
-    it('should decrease weight more for fast correct answers', () => {
-      selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
+    it('should decrease weight more for fast correct answers', async () => {
+      await selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
       
       const normalized = { smaller: 3, larger: 4 };
-      const state = storage.getProblemState(userId, normalized);
+      const state = await storage.getProblemState(userId, normalized);
       expect(state.weight).toBe(9); // 12 - 3 (weightDecreaseFast)
     });
 
-    it('should decrease weight less for slow correct answers', () => {
-      selector.updateProblemAfterAttempt(userId, problem, true, 6000, testConfig);
+    it('should decrease weight less for slow correct answers', async () => {
+      await selector.updateProblemAfterAttempt(userId, problem, true, 6000, testConfig);
       
       const normalized = { smaller: 3, larger: 4 };
-      const state = storage.getProblemState(userId, normalized);
+      const state = await storage.getProblemState(userId, normalized);
       expect(state.weight).toBe(11); // 12 - 1 (weightDecreaseSlow)
     });
 
-    it('should not let weight go below 1', () => {
+    it('should not let weight go below 1', async () => {
       // Multiple fast correct answers
       for (let i = 0; i < 5; i++) {
-        selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
+        await selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
       }
       
       const normalized = { smaller: 3, larger: 4 };
-      const state = storage.getProblemState(userId, normalized);
+      const state = await storage.getProblemState(userId, normalized);
       expect(state.weight).toBe(1);
     });
   });
@@ -130,17 +144,17 @@ describe('Problem Selection System', () => {
   describe('Problem Selection', () => {
     const userId = 1;
 
-    it('should select problem with highest weight when no history', () => {
+    it('should select problem with highest weight when no history', async () => {
       const history: ProblemHistory[] = [];
       mockRandom.mockReturnValue(0); // Force consistent order for test
-      const selected = selector.selectNextProblem(userId, history, testConfig);
+      const selected = await selector.selectNextProblem(userId, history, testConfig);
       
       // With factors 2-5, 5x5=25 should be the highest initial weight
       expect(Math.max(selected.factor1, selected.factor2)).toBe(5);
       expect(Math.min(selected.factor1, selected.factor2)).toBe(5);
     });
 
-    it('should not select recently seen problems in either order', () => {
+    it('should not select recently seen problems in either order', async () => {
       const history: ProblemHistory[] = [
         {
           factor1: 5,
@@ -151,7 +165,7 @@ describe('Problem Selection System', () => {
         }
       ];
       
-      const selected = selector.selectNextProblem(userId, history, testConfig);
+      const selected = await selector.selectNextProblem(userId, history, testConfig);
       
       // Should not select 5x4 or 4x5
       expect(selected).not.toEqual({ factor1: 5, factor2: 4 });
@@ -160,18 +174,18 @@ describe('Problem Selection System', () => {
   });
 
   describe('Per-User Problem States', () => {
-    it('should maintain separate weights for different users', () => {
+    it('should maintain separate weights for different users', async () => {
       const problem: Problem = { factor1: 3, factor2: 4 };
       const normalized = { smaller: 3, larger: 4 };
       
       // User 1 gets it wrong
-      selector.updateProblemAfterAttempt(1, problem, false, 3000, testConfig);
+      await selector.updateProblemAfterAttempt(1, problem, false, 3000, testConfig);
       
       // User 2 gets it right quickly
-      selector.updateProblemAfterAttempt(2, problem, true, 3000, testConfig);
+      await selector.updateProblemAfterAttempt(2, problem, true, 3000, testConfig);
       
-      const user1State = storage.getProblemState(1, normalized);
-      const user2State = storage.getProblemState(2, normalized);
+      const user1State = await storage.getProblemState(1, normalized);
+      const user2State = await storage.getProblemState(2, normalized);
       
       expect(user1State.weight).toBe(17); // Increased for wrong answer
       expect(user2State.weight).toBe(9);  // Decreased for fast correct answer

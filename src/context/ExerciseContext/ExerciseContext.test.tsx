@@ -198,7 +198,8 @@ describe('ExerciseContext', () => {
       });
 
       const savedState = JSON.parse(localStorage.getItem('exerciseState') || '');
-      expect(savedState.results).toHaveLength(1);
+      expect(savedState.results).toHaveLength(5);
+      expect(savedState.results.filter((r: boolean | null) => r !== null)).toHaveLength(1);
     });
 
     it('should restore state from localStorage', () => {

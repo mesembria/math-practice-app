@@ -6,13 +6,13 @@ export class User implements IUser {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ type: 'varchar' })
   name: string;
 
-  @Column({ default: false })
+  @Column({ type: 'boolean', default: false })
   is_parent: boolean;
 
-  @Column({ default: 1 })
+  @Column({ type: 'int', default: 1 })
   current_level: number;
 
   @CreateDateColumn()
