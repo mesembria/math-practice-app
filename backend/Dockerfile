@@ -30,12 +30,14 @@ RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/migrations ./src/migrations
 
-# Create data directory for SQLite
-RUN mkdir -p data
+# Create data directory for SQLite and set proper permissions
+RUN mkdir -p /app/data && \
+    chown -R node:node /app/data
 
 # Environment variables
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV DB_PATH=/app/data/math-practice.sqlite
 
 # Expose port
 EXPOSE 3001
