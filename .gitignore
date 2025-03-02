@@ -8,6 +8,14 @@ pnpm-debug.log*
 lerna-debug.log*
 **/repomix-output.txt
 
+# Database files
+backend/data/*.sqlite
+backend/data/*.db
+*.sqlite
+*.sqlite3
+*.db
+/data/
+
 node_modules
 dist
 dist-ssr

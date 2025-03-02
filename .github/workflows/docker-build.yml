@@ -1,4 +1,4 @@
-name: Build and Push Docker Image
+name: Build and Push Docker Images
 
 on:
   push:
@@ -30,12 +30,74 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      # Build and push frontend image
+      - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/math-practice-app:latest
-            ghcr.io/${{ github.repository_owner }}/math-practice-app:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/math-practice-frontend:latest
+            ghcr.io/${{ github.repository_owner }}/math-practice-frontend:${{ github.sha }}
+
+      # Build and push backend image
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/math-practice-backend:latest
+            ghcr.io/${{ github.repository_owner }}/math-practice-backend:${{ github.sha }}
+
+      # Optional: Create a GitHub release with docker-compose.yml
+      - name: Create docker-compose file for release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cat > docker-compose.prod.yml << EOL
+          version: '3.8'
+
+          services:
+            frontend:
+              image: ghcr.io/${{ github.repository_owner }}/math-practice-frontend:latest
+              ports:
+                - "80:80"
+              depends_on:
+                - backend
+              networks:
+                - math-practice-network
+              restart: unless-stopped
+
+            backend:
+              image: ghcr.io/${{ github.repository_owner }}/math-practice-backend:latest
+              volumes:
+                - backend-data:/app/data
+              ports:
+                - "3001:3001"
+              networks:
+                - math-practice-network
+              restart: unless-stopped
+              healthcheck:
+                test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+                interval: 30s
+                timeout: 3s
+                retries: 3
+                start_period: 5s
+
+          networks:
+            math-practice-network:
+              driver: bridge
+
+          volumes:
+            backend-data:
+              driver: local
+          EOL
+
+      - name: Upload docker-compose.prod.yml as artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v3
+        with:
+          name: docker-compose.prod.yml
+          path: docker-compose.prod.yml
