@@ -8,17 +8,18 @@ interface MasteryGridProps {
 
 const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
   return (
-    <div className="bg-white rounded-xl shadow-md p-4 border border-gray-100">
-      <h3 className="text-xl font-semibold text-gray-800 mb-2">Problem Mastery</h3>
-      <p className="text-sm text-gray-600 mb-4">
+    <div className="bg-white rounded-xl shadow-md p-2 border border-gray-100">
+      {/* Short description - reduced to save space */}
+      <p className="text-xs text-gray-600 mb-2">
         Green indicates mastery, gray is neutral, and red indicates need for more practice.
       </p>
       
-      <div className="grid grid-cols-10 gap-px bg-gray-100 p-2 rounded-lg">
+      {/* Compact responsive grid */}
+      <div className="grid grid-cols-10 gap-px bg-gray-100 rounded-lg overflow-hidden">
         {/* Column headers */}
-        <div className="text-center font-medium text-gray-600 p-1 bg-gray-50 rounded-sm">×</div>
+        <div className="text-center font-medium text-gray-600 p-0.5 bg-gray-50 text-xs">×</div>
         {[2,3,4,5,6,7,8,9,10].map(num => (
-          <div key={num} className="text-center font-medium text-gray-600 p-1 bg-gray-50 rounded-sm">
+          <div key={num} className="text-center font-medium text-gray-600 p-0.5 bg-gray-50 text-xs">
             {num}
           </div>
         ))}
@@ -27,7 +28,7 @@ const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
         {[2,3,4,5,6,7,8,9,10].map(row => (
           <React.Fragment key={row}>
             {/* Row header */}
-            <div className="text-center font-medium text-gray-600 p-1 bg-gray-50 rounded-sm">
+            <div className="text-center font-medium text-gray-600 p-0.5 bg-gray-50 text-xs">
               {row}
             </div>
             
@@ -55,26 +56,27 @@ const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
               
               const tooltipText = `${row} × ${col} = ${product}\n${masteryStatus}${weight ? ` (weight: ${weight.weight.toFixed(1)})` : ''}`;
               
+              // For problematic cells, add a highlight
+              const isNeedsPractice = weight && weight.weight > 12;
+              const isMastered = weight && weight.weight < 5;
+              
               return (
                 <div
                   key={`${row}-${col}`}
-                  className="relative w-full pb-[100%] rounded-sm hover:opacity-75 transition-opacity cursor-help"
+                  className="relative w-full aspect-square flex items-center justify-center text-xs font-medium text-gray-700"
                   style={{ backgroundColor: cellColor }}
                   title={tooltipText}
                 >
-                  <div className="absolute inset-0 flex items-center justify-center text-xs font-medium text-gray-700">
-                    {product}
-                  </div>
+                  {product}
                   
-                  {/* Visual indicators for high-priority problems */}
-                  {weight && weight.weight > 15 && (
-                    <div className="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full" 
+                  {/* Only show indicators for extreme cases to reduce visual noise */}
+                  {isNeedsPractice && (
+                    <div className="absolute top-0 right-0 h-1 w-1 bg-red-500 rounded-full" 
                          title="High priority for practice"/>
                   )}
                   
-                  {/* Visual indicators for mastered problems */}
-                  {weight && weight.weight < 5 && (
-                    <div className="absolute bottom-0 right-0 h-2 w-2 bg-green-500 rounded-full"
+                  {isMastered && (
+                    <div className="absolute bottom-0 right-0 h-1 w-1 bg-green-500 rounded-full"
                          title="Well mastered"/>
                   )}
                 </div>
@@ -84,18 +86,18 @@ const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
         ))}
       </div>
       
-      {/* Legend with clearer description */}
-      <div className="flex justify-center gap-6 mt-4 text-sm">
+      {/* Simplified compact legend */}
+      <div className="flex justify-center gap-2 mt-2 text-xs">
         <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: getWeightColor(5) }}></div>
+          <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: getWeightColor(5) }}></div>
           <span>Mastered</span>
         </div>
         <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded-sm bg-gray-200"></div>
+          <div className="w-2 h-2 rounded-sm bg-gray-200"></div>
           <span>Neutral</span>
         </div>
         <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: getWeightColor(15) }}></div>
+          <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: getWeightColor(15) }}></div>
           <span>Needs practice</span>
         </div>
       </div>

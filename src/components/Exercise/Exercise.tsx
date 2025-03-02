@@ -1,4 +1,4 @@
-// src/components/Exercise/Exercise.tsx
+// src/components/Exercise/Exercise.tsx - Updated
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api, SessionSummary as SessionSummaryType } from '../../services/api';
@@ -176,19 +176,22 @@ const Exercise: React.FC = () => {
 
     if (sessionSummary) {
       return (
-        <div className="flex flex-col items-center min-h-[600px] gap-8 p-4">
-          <h2 className="text-2xl font-bold text-gray-800">
-            Exercise Results
-          </h2>
-          <SessionSummary summary={sessionSummary} />
-          <div className="flex gap-4">
+        <div className="flex flex-col max-w-[1200px] mx-auto p-2 pb-4">
+          {/* Header row with title and button */}
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-800">
+              Exercise Results
+            </h2>
             <button
               onClick={() => navigate('/')}
-              className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
             >
               Start New Session
             </button>
           </div>
+          
+          {/* Session summary content */}
+          <SessionSummary summary={sessionSummary} />
         </div>
       );
     }

@@ -36,16 +36,11 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[600px] gap-4 p-4">
-      <div className="w-full max-w-4xl flex justify-between items-center mb-2">
-        <ProgressIndicator
-          totalProblems={totalProblems}
-          currentProblemIndex={currentProblemIndex}
-          results={results}
-          className="w-full h-3"
-        />
+      {/* Fixed position pause button at top right */}
+      <div className="w-full max-w-4xl flex justify-end items-center mb-2">
         <button
           onClick={togglePause}
-          className="ml-4 p-2 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
+          className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
           aria-label={isPaused ? "Resume" : "Pause"}
         >
           {isPaused ? (
@@ -63,53 +58,69 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
       {isPaused ? (
         <PauseOverlay onResume={togglePause} />
       ) : (
-        <div className="flex flex-col items-center gap-6 w-full max-w-2xl">
-          <ProblemDisplay
-            factor1={currentProblem.factor1}
-            factor2={currentProblem.factor2}
-            answer={currentAnswer}
-            className="w-full min-h-[120px] text-5xl md:text-6xl"
-          />
-
-          <div className="flex gap-2 w-full max-w-md">
-            <NumericKeyboard
-              value={currentAnswer}
-              onChange={setCurrentAnswer}
-              onSubmit={currentAnswer !== '0' ? handleNext : undefined}
-              maxLength={3}
-              className="flex-1"
-            />
-            
-            <button
-              onClick={handleNext}
-              disabled={currentAnswer === '0'}
-              aria-label="Next"
-              className={`
-                w-20 rounded-xl text-xl font-semibold p-3
-                transition-colors duration-150 flex items-center justify-center
-                h-[calc(48px*4+0.5rem*3+1.5rem*2)] sm:h-[calc(56px*4+0.5rem*3+1.5rem*2)] md:h-[calc(64px*4+0.5rem*3+1.5rem*2)]
-                ${currentAnswer === '0'
-                  ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'}
-              `}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-8 w-8"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
+        <>
+          {/* Separate container for progress indicator with margin bottom */}
+          <div className="relative w-full max-w-4xl mb-8">
+            {/* Add distinctive styling for visibility */}
+            <div className="p-3 bg-blue-50 rounded-lg shadow-md border border-blue-100">
+              <ProgressIndicator
+                totalProblems={totalProblems}
+                currentProblemIndex={currentProblemIndex}
+                results={results}
+                className="w-full h-6"
+              />
+            </div>
           </div>
-        </div>
+          
+          {/* Main content area - problem display and keyboard with extra margin-top to prevent overlap */}
+          <div className="flex flex-col items-center gap-6 w-full max-w-2xl mt-4">
+            <ProblemDisplay
+              factor1={currentProblem.factor1}
+              factor2={currentProblem.factor2}
+              answer={currentAnswer}
+              className="w-full min-h-[120px] text-5xl md:text-6xl"
+            />
+
+            <div className="flex gap-2 w-full max-w-md">
+              <NumericKeyboard
+                value={currentAnswer}
+                onChange={setCurrentAnswer}
+                onSubmit={currentAnswer !== '0' ? handleNext : undefined}
+                maxLength={3}
+                className="flex-1"
+              />
+              
+              <button
+                onClick={handleNext}
+                disabled={currentAnswer === '0'}
+                aria-label="Next"
+                className={`
+                  w-20 rounded-xl text-xl font-semibold p-3
+                  transition-colors duration-150 flex items-center justify-center
+                  h-[calc(48px*4+0.5rem*3+1.5rem*2)] sm:h-[calc(56px*4+0.5rem*3+1.5rem*2)] md:h-[calc(64px*4+0.5rem*3+1.5rem*2)]
+                  ${currentAnswer === '0'
+                    ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'}
+                `}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-8 w-8"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </>
       )}
       
       {/* Progress stats at bottom */}
