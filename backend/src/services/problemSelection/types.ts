@@ -37,23 +37,25 @@ export interface ProblemSelectionConfig {
 
   // Problem Selection
   recentProblemCount: number;     // How many recent problems to exclude
-  targetResponseTime: number;      // Target time to solve problem (ms)
-  
+  targetResponseTime: number;     // Target time to solve problem (ms)
+
   // Weight Adjustments
-  weightIncreaseWrong: number;    // W: Weight increase for wrong answer
-  weightDecreaseFast: number;     // X: Weight decrease for fast correct answer
-  weightDecreaseSlow: number;     // Z: Weight decrease for slow correct answer
+  weightIncreaseWrong: number;    // Weight increase for wrong answer
+  maxWeightDecrease: number;      // Maximum weight decrease for fastest correct answers
+  midWeightDecrease: number;      // Weight decrease at target response time
+  maxResponseTimeFactor: number;  // Multiple of target time after which no reduction occurs
 }
 
-// Optimize weight adjustments for better differentiation
+// Update default config
 export const DEFAULT_CONFIG: ProblemSelectionConfig = {
   minFactor: 2,
   maxFactor: 10,
-  
+
   recentProblemCount: 20,
-  targetResponseTime: 5000,       // 5 seconds
-  
-  weightIncreaseWrong: 7,         // Increase weight significantly for wrong answers
-  weightDecreaseFast: 3,          // Moderate decrease for fast correct answers 
-  weightDecreaseSlow: 1           // Small decrease for slow correct answers
+  targetResponseTime: 7000,       // 5 seconds
+
+  weightIncreaseWrong: 5,         // Reduced from 7
+  maxWeightDecrease: 3,           // Maximum weight decrease for fastest responses
+  midWeightDecrease: 1.5,         // Weight decrease at target response time
+  maxResponseTimeFactor: 3        // Multiple of target time after which no reduction occurs
 };

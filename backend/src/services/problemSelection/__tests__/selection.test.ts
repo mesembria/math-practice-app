@@ -50,7 +50,12 @@ describe('Problem Selection System', () => {
   let selector: ProblemSelector;
   let storage: MockStorage;
   let testConfig: ProblemSelectionConfig;
-  let mockRandom: ReturnType<typeof vi.spyOn>;
+  // Define a typed mock for Math.random
+  let mockRandom: {
+    mockReturnValueOnce: (value: number) => typeof mockRandom;
+    mockReturnValue: (value: number) => typeof mockRandom;
+    mockRestore: () => void;
+  };
 
   beforeEach(() => {
     testConfig = {
@@ -59,8 +64,9 @@ describe('Problem Selection System', () => {
       recentProblemCount: 3,
       targetResponseTime: 5000,
       weightIncreaseWrong: 5,
-      weightDecreaseFast: 3,
-      weightDecreaseSlow: 1
+      maxWeightDecrease: 3,
+      midWeightDecrease: 1.5,
+      maxResponseTimeFactor: 3
     };
     storage = new MockStorage();
     selector = new ProblemSelector(storage);
@@ -113,29 +119,64 @@ describe('Problem Selection System', () => {
       expect(state.weight).toBe(17); // 12 + 5 (weightIncreaseWrong)
     });
 
-    it('should decrease weight more for fast correct answers', async () => {
-      await selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
+    it('should decrease weight by maximum amount for very fast correct answers', async () => {
+      // Very fast answer (much faster than target time)
+      await selector.updateProblemAfterAttempt(userId, problem, true, 1000, testConfig);
       
       const normalized = { smaller: 3, larger: 4 };
       const state = await storage.getProblemState(userId, normalized);
-      expect(state.weight).toBe(9); // 12 - 3 (weightDecreaseFast)
+      
+      // The formula results in 9.3 for very fast answers
+      // Exact formula: 12 - (3 - (3-1.5) * 1000/5000) = 12 - 2.7 = 9.3
+      expect(state.weight).toBeCloseTo(9.3, 1);
     });
 
-    it('should decrease weight less for slow correct answers', async () => {
-      await selector.updateProblemAfterAttempt(userId, problem, true, 6000, testConfig);
+    it('should decrease weight by mid amount for answers at target time', async () => {
+      // Answer exactly at the target response time
+      await selector.updateProblemAfterAttempt(userId, problem, true, testConfig.targetResponseTime, testConfig);
       
       const normalized = { smaller: 3, larger: 4 };
       const state = await storage.getProblemState(userId, normalized);
-      expect(state.weight).toBe(11); // 12 - 1 (weightDecreaseSlow)
+      
+      // Should apply midWeightDecrease (1.5) for answers at target time
+      // 12 - 1.5 = 10.5
+      expect(state.weight).toBeCloseTo(10.5, 1);
+    });
+
+    it('should decrease weight by small amount for slow correct answers', async () => {
+      // Slower than target time but not beyond maxResponseTimeFactor
+      const slowTime = testConfig.targetResponseTime * 2; // Half-way between target and max
+      await selector.updateProblemAfterAttempt(userId, problem, true, slowTime, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = await storage.getProblemState(userId, normalized);
+      
+      // Should apply a fraction of midWeightDecrease for slow answers
+      // 12 - (midWeightDecrease * 0.5) = 12 - 0.75 = 11.25
+      expect(state.weight).toBeCloseTo(11.25, 1);
+    });
+
+    it('should not decrease weight for very slow correct answers', async () => {
+      // Answer beyond maxResponseTimeFactor
+      const verySlowTime = testConfig.targetResponseTime * testConfig.maxResponseTimeFactor * 1.1;
+      await selector.updateProblemAfterAttempt(userId, problem, true, verySlowTime, testConfig);
+      
+      const normalized = { smaller: 3, larger: 4 };
+      const state = await storage.getProblemState(userId, normalized);
+      
+      // Should not decrease weight for very slow answers (beyond maxResponseTimeFactor)
+      // 12 - 0 = 12
+      expect(state.weight).toBe(12);
     });
 
     it('should not let weight go below 1', async () => {
-      // Multiple fast correct answers
-      for (let i = 0; i < 5; i++) {
-        await selector.updateProblemAfterAttempt(userId, problem, true, 3000, testConfig);
-      }
-      
+      // Set initial state with low weight
       const normalized = { smaller: 3, larger: 4 };
+      await storage.updateProblemState(userId, normalized, { weight: 2, lastSeen: 0 });
+      
+      // Fast correct answer that would reduce below 1
+      await selector.updateProblemAfterAttempt(userId, problem, true, 1000, testConfig);
+      
       const state = await storage.getProblemState(userId, normalized);
       expect(state.weight).toBe(1);
     });
@@ -182,13 +223,13 @@ describe('Problem Selection System', () => {
       await selector.updateProblemAfterAttempt(1, problem, false, 3000, testConfig);
       
       // User 2 gets it right quickly
-      await selector.updateProblemAfterAttempt(2, problem, true, 3000, testConfig);
+      await selector.updateProblemAfterAttempt(2, problem, true, 1000, testConfig);
       
       const user1State = await storage.getProblemState(1, normalized);
       const user2State = await storage.getProblemState(2, normalized);
       
       expect(user1State.weight).toBe(17); // Increased for wrong answer
-      expect(user2State.weight).toBe(9);  // Decreased for fast correct answer
+      expect(user2State.weight).toBeCloseTo(9.3, 1); // Decreased according to the weight reduction formula
     });
   });
 });

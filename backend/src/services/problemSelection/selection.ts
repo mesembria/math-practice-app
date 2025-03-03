@@ -153,23 +153,38 @@ async updateProblemAfterAttempt(
   // Normalize problem to ensure consistent storage regardless of factor order
   const normalized = this.normalizeProblem(problem);
   const state = await this.storage.getProblemState(userId, normalized);
-  
+
   // Update weight based on performance
   let newWeight = state.weight;
   let adjustmentReason = '';
-  
+
   if (!correct) {
     // Incorrect answer: increase weight
     newWeight += config.weightIncreaseWrong;
     adjustmentReason = `incorrect answer (+${config.weightIncreaseWrong})`;
-  } else if (timeToAnswer < config.targetResponseTime) {
-    // Fast correct answer: decrease weight more
-    newWeight -= config.weightDecreaseFast;
-    adjustmentReason = `fast correct answer (-${config.weightDecreaseFast})`;
   } else {
-    // Slow correct answer: decrease weight less
-    newWeight -= config.weightDecreaseSlow;
-    adjustmentReason = `slow correct answer (-${config.weightDecreaseSlow})`;
+    // Correct answer: calculate weight reduction based on response time
+    let weightReduction = 0;
+    const targetTime = config.targetResponseTime;
+    const maxTime = targetTime * config.maxResponseTimeFactor;
+
+    if (timeToAnswer <= targetTime) {
+      // Fast response: linear reduction from maxWeightDecrease to midWeightDecrease
+      weightReduction = config.maxWeightDecrease -
+        ((config.maxWeightDecrease - config.midWeightDecrease) * timeToAnswer / targetTime);
+      adjustmentReason = `fast correct answer (${timeToAnswer}ms, -${weightReduction.toFixed(2)})`;
+    } else if (timeToAnswer < maxTime) {
+      // Slow response: linear reduction from midWeightDecrease to 0
+      weightReduction = config.midWeightDecrease *
+        (1 - (timeToAnswer - targetTime) / (maxTime - targetTime));
+      adjustmentReason = `slow correct answer (${timeToAnswer}ms, -${weightReduction.toFixed(2)})`;
+    } else {
+      // Very slow response: no reduction
+      weightReduction = 0;
+      adjustmentReason = `very slow correct answer (${timeToAnswer}ms, -${weightReduction})`;
+    }
+
+    newWeight -= weightReduction;
   }
 
   // Ensure weight doesn't go below 1
@@ -195,6 +210,7 @@ async updateProblemAfterAttempt(
     wasClipped: wasClipped ? 'Yes (minimum weight enforced)' : 'No'
   });
 }
+
 
   /**
    * Gets the current state of a problem for a user, using normalization
