@@ -38,7 +38,7 @@ const SessionSummary: React.FC<Props> = ({ summary, className = '' }) => {
 
         {/* Right Column: Problem Mastery only */}
         <div>
-          <h3 className="text-lg font-semibold mb-2">Problem Mastery</h3>
+  
           <MasteryGrid problemWeights={summary.problemWeights} />
         </div>
       </div>

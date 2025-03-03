@@ -8,14 +8,15 @@ interface ProblemListProps {
 
 const ProblemList: React.FC<ProblemListProps> = ({ attempts }) => {
   // System-wide target response time (5 seconds) from backend configuration
-  const TARGET_RESPONSE_TIME = 5000; // ms
+  // TODO: This should be past from the backend
+  const TARGET_RESPONSE_TIME = 7000; // ms
   
   return (
     <div className="bg-white rounded-xl shadow-md overflow-hidden">
       {/* Scrollable container with fixed height */}
       <div className="relative">
         {/* Scrollable content area with fixed height - adjusted to be more compact */}
-        <div className="max-h-[300px] overflow-y-auto">
+        <div className="max-h-[400px] overflow-y-auto">
           {attempts.map((attempt, index) => {
             const correctAnswer = attempt.factor1 * attempt.factor2;
             const isCorrect = attempt.isCorrect;
@@ -69,12 +70,7 @@ const ProblemList: React.FC<ProblemListProps> = ({ attempts }) => {
         </div>
       </div>
       
-      {/* Add scrolling indicator text if there are many attempts */}
-      {attempts.length > 4 && (
-        <div className="text-xs text-gray-500 text-center py-2 bg-gray-50 border-t">
-          Scroll to see all {attempts.length} problems
-        </div>
-      )}
+
     </div>
   );
 };

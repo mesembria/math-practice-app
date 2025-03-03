@@ -9,10 +9,7 @@ interface MasteryGridProps {
 const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
   return (
     <div className="bg-white rounded-xl shadow-md p-2 border border-gray-100">
-      {/* Short description - reduced to save space */}
-      <p className="text-xs text-gray-600 mb-2">
-        Green indicates mastery, gray is neutral, and red indicates need for more practice.
-      </p>
+
       
       {/* Compact responsive grid */}
       <div className="grid grid-cols-10 gap-px bg-gray-100 rounded-lg overflow-hidden">
