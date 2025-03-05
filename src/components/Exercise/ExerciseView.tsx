@@ -37,7 +37,7 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
     : results.findIndex(r => r === null);
 
   return (
-    <div className="flex flex-col items-center h-screen max-h-screen gap-4 p-4 overflow-hidden">
+    <div className="flex flex-col items-center h-screen max-h-screen gap-3 p-4 overflow-hidden">
       {isPaused ? (
         <PauseOverlay onResume={togglePause} />
       ) : (

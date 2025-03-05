@@ -10,11 +10,14 @@ interface User {
 
 const LandingPage: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<number | ''>('');
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [numberOfProblems, setNumberOfProblems] = useState<number>(10);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  // Preset values for number of problems
+  const problemPresets = [5, 10, 15, 20];
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -40,10 +43,10 @@ const LandingPage: React.FC = () => {
     }
 
     try {
-      const session = await api.createSession(Number(selectedUserId), numberOfProblems);
+      const session = await api.createSession(selectedUserId, numberOfProblems);
       navigate(`/exercise/${session.id}`);
-      } catch (err: unknown) {
-        console.error('Error creating session:', err);
+    } catch (err: unknown) {
+      console.error('Error creating session:', err);
       setError('Failed to start exercise session. Please try again.');
     }
   };
@@ -51,7 +54,10 @@ const LandingPage: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-xl text-gray-600">Loading...</p>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin"></div>
+          <p className="text-xl text-gray-600">Loading users...</p>
+        </div>
       </div>
     );
   }
@@ -64,49 +70,74 @@ const LandingPage: React.FC = () => {
         </h1>
 
         {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6 text-center">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-8">
+          {/* User Selection */}
           <div>
-            <label htmlFor="user" className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-lg font-medium text-gray-700 mb-3">
               Select User
             </label>
-            <select
-              id="user"
-              value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value ? Number(e.target.value) : '')}
-              className="block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">Choose a user</option>
+            <div className="grid grid-cols-2 gap-3">
               {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name}
-                </option>
+                <button
+                  key={user.id}
+                  type="button"
+                  onClick={() => setSelectedUserId(user.id)}
+                  className={`
+                    p-3 rounded-lg text-center transition-all duration-200
+                    ${selectedUserId === user.id
+                      ? 'bg-blue-500 text-white ring-2 ring-blue-300 ring-offset-2'
+                      : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                    }
+                  `}
+                >
+                  <span className="font-medium">{user.name}</span>
+                </button>
               ))}
-            </select>
+            </div>
           </div>
 
+          {/* Number of Problems Selection */}
           <div>
-            <label htmlFor="problems" className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-lg font-medium text-gray-700 mb-3">
               Number of Problems
             </label>
-            <input
-              type="number"
-              id="problems"
-              min="1"
-              max="50"
-              value={numberOfProblems}
-              onChange={(e) => setNumberOfProblems(Math.max(1, Math.min(50, Number(e.target.value))))}
-              className="block w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-            />
+            <div className="flex flex-wrap gap-3 justify-center">
+              {problemPresets.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setNumberOfProblems(preset)}
+                  className={`
+                    py-2 px-5 rounded-lg font-medium transition-all duration-200 min-w-16
+                    ${numberOfProblems === preset
+                      ? 'bg-green-500 text-white ring-2 ring-green-300 ring-offset-2'
+                      : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                    }
+                  `}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* Start Button */}
           <button
             type="submit"
-            className="w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors duration-200"
+            disabled={!selectedUserId}
+            className={`
+              w-full py-3 px-4 rounded-lg text-white text-lg font-medium 
+              transition-colors duration-200
+              ${!selectedUserId
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-blue-500 hover:bg-blue-600'
+              }
+            `}
           >
             Start Practice
           </button>
