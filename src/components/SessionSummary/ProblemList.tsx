@@ -16,7 +16,7 @@ const ProblemList: React.FC<ProblemListProps> = ({ attempts }) => {
       {/* Scrollable container with fixed height */}
       <div className="relative">
         {/* Scrollable content area with fixed height - adjusted to be more compact */}
-        <div className="max-h-[400px] overflow-y-auto">
+        <div className="max-h-[350px] overflow-y-auto">
           {attempts.map((attempt, index) => {
             const correctAnswer = attempt.factor1 * attempt.factor2;
             const isCorrect = attempt.isCorrect;
