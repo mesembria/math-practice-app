@@ -16,18 +16,6 @@ async function startServer() {
     await AppDataSource.runMigrations();
     console.log("Database migrations completed");
 
-    // Create a test user if none exists
-    const userRepo = AppDataSource.getRepository(User);
-    const userCount = await userRepo.count();
-    if (userCount === 0) {
-      await userRepo.save({
-        name: 'Test User',
-        is_parent: false,
-        current_level: 1
-      });
-      console.log("Created test user");
-    }
-
     // Start the server
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);

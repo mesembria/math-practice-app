@@ -17,7 +17,7 @@ const LandingPage: React.FC = () => {
   const navigate = useNavigate();
 
   // Preset values for number of problems
-  const problemPresets = [5, 10, 15, 20];
+  const problemPresets = [5, 10, 15, 20, 25];
 
   useEffect(() => {
     const fetchUsers = async () => {
