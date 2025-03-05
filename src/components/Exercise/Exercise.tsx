@@ -1,4 +1,4 @@
-// src/components/Exercise/Exercise.tsx - Updated
+// src/components/Exercise/Exercise.tsx - Updated with Encouragement Messages
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api, SessionSummary as SessionSummaryType } from '../../services/api';
@@ -7,6 +7,8 @@ import CompletionMessage from './CompletionMessage';
 import SessionSummary from '../SessionSummary/SessionSummary';
 import LoadingView from './LoadingView';
 import ErrorView from './ErrorView';
+import EncouragementMessage from './EncouragementMessage';
+import useEncouragementMessages from './hooks/useEncouragementMessage';
 
 import { Problem } from './types';
 import { useExerciseTimer } from './hooks/useExercise';
@@ -27,6 +29,7 @@ const Exercise: React.FC = () => {
   const [totalProblems, setTotalProblems] = useState(0);
   const [showCompletionMessage, setShowCompletionMessage] = useState(false);
   const [correctCount, setCorrectCount] = useState(0);
+  const [isProcessingAnswer, setIsProcessingAnswer] = useState(false);
 
   const { 
     setStartTime, 
@@ -35,6 +38,14 @@ const Exercise: React.FC = () => {
     calculateResponseTime, 
     resetTimer 
   } = useExerciseTimer();
+
+  // Initialize the encouragement messages hook
+  const {
+    message,
+    isVisible,
+    hideMessage,
+    processEncouragementData
+  } = useEncouragementMessages();
 
   // Fetch session and first problem on mount
   useEffect(() => {
@@ -96,8 +107,10 @@ const Exercise: React.FC = () => {
 
   // Handle answer submission
   const handleNext = async () => {
-    if (!currentProblem || !sessionId || isPaused) return;
+    if (!currentProblem || !sessionId || isPaused || isProcessingAnswer) return;
 
+    // Start the processing state - will disable input during encouragement display
+    setIsProcessingAnswer(true);
     const responseTimeMs = calculateResponseTime();
     
     try {
@@ -121,6 +134,11 @@ const Exercise: React.FC = () => {
         setCorrectCount(prev => prev + 1);
       }
 
+      // Process encouragement data if available
+      if (result.encouragementData) {
+        processEncouragementData(result.encouragementData);
+      }
+
       if (result.isSessionComplete && result.sessionSummary) {
         // Show completion message briefly before showing full summary
         setShowCompletionMessage(true);
@@ -132,16 +150,41 @@ const Exercise: React.FC = () => {
           setShowCompletionMessage(false);
         }, 2000);
       } else {
-        // Fetch next problem
-        const nextProblem = await api.getNextProblem(parseInt(sessionId));
-        setCurrentProblem(nextProblem);
-        setCurrentAnswer('0');
-        resetTimer();
+        // If we're showing an encouragement message, wait for it to finish
+        if (result.encouragementData && result.isCorrect) {
+          // Wait for the encouragement message to display before fetching next problem
+          setTimeout(async () => {
+            try {
+              const nextProblem = await api.getNextProblem(parseInt(sessionId));
+              setCurrentProblem(nextProblem);
+              setCurrentAnswer('0');
+              resetTimer();
+              setIsProcessingAnswer(false);
+            } catch (err) {
+              console.error('Error fetching next problem:', err);
+              setError('Failed to load the next problem. Please try again.');
+              setIsProcessingAnswer(false);
+            }
+          }, 2000); // Match the display duration from useEncouragementMessages
+        } else {
+          // If no encouragement message, fetch next problem immediately
+          const nextProblem = await api.getNextProblem(parseInt(sessionId));
+          setCurrentProblem(nextProblem);
+          setCurrentAnswer('0');
+          resetTimer();
+          setIsProcessingAnswer(false);
+        }
       }
     } catch (err: unknown) {
       console.error('Error submitting attempt:', err);
       setError('Failed to submit answer. Please try again.');
+      setIsProcessingAnswer(false);
     }
+  };
+
+  // Handle encouragement message complete
+  const handleMessageComplete = () => {
+    hideMessage();
   };
 
   // Handle keyboard shortcuts for pause/resume
@@ -202,16 +245,28 @@ const Exercise: React.FC = () => {
   }
 
   return (
-    <ExerciseView
-      currentProblem={currentProblem}
-      currentAnswer={currentAnswer}
-      setCurrentAnswer={setCurrentAnswer}
-      results={results}
-      totalProblems={totalProblems}
-      isPaused={isPaused}
-      togglePause={togglePause}
-      handleNext={handleNext}
-    />
+    <div className="relative">
+      <ExerciseView
+        currentProblem={currentProblem}
+        currentAnswer={currentAnswer}
+        setCurrentAnswer={setCurrentAnswer}
+        results={results}
+        totalProblems={totalProblems}
+        isPaused={isPaused}
+        togglePause={togglePause}
+        handleNext={handleNext}
+        isInteractionDisabled={isProcessingAnswer}
+      />
+      
+      {/* Encouragement message */}
+      {message && (
+        <EncouragementMessage 
+          message={message} 
+          isVisible={isVisible} 
+          onAnimationComplete={handleMessageComplete} 
+        />
+      )}
+    </div>
   );
 };
 
