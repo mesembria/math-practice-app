@@ -336,6 +336,73 @@ export class SessionsController {
       }
       await sessionRepository.save(session);
 
+
+      // Get previous attempts for this specific problem combination
+      const previousAttempts = await problemRepository
+        .createQueryBuilder('attempt')
+        .innerJoin('attempt.session', 'session')
+        .where('session.user_id = :userId', { userId: session.user_id })
+        .andWhere('attempt.factor1 = :factor1', { factor1: problem.factor1 })
+        .andWhere('attempt.factor2 = :factor2', { factor2: problem.factor2 })
+        .andWhere('attempt.id != :currentAttemptId', { currentAttemptId: problem.id }) // Exclude current attempt
+        .orderBy('attempt.created_at', 'DESC')
+        .getMany();
+
+      // Get recent attempts in the current session to determine consecutive correct answers
+      const recentSessionAttempts = await problemRepository
+        .createQueryBuilder('attempt')
+        .where('attempt.session_id = :sessionId', { sessionId: session.id })
+        .andWhere('attempt.is_correct IS NOT NULL') // Only include answered problems
+        .orderBy('attempt.created_at', 'DESC')
+        .getMany();
+
+      // Count consecutive correct answers until we hit an incorrect one
+      let correctStreak = 0;
+      for (const attempt of recentSessionAttempts) {
+        if (attempt.is_correct) {
+          correctStreak++;
+        } else {
+          break;
+        }
+      }
+
+      // Determine if this problem was previously answered incorrectly
+      const wasIncorrectBefore = previousAttempts.some(attempt => 
+        attempt.is_correct === false
+      );
+
+      // Determine if this is the first time the user answered this problem correctly
+      const isFirstTimeCorrect = isCorrect && (
+        previousAttempts.length === 0 || 
+        !previousAttempts.some(attempt => attempt.is_correct === true)
+      );
+
+      // Get previous response time (most recent attempt at this problem)
+      const previousAttempt = previousAttempts.length > 0 ? previousAttempts[0] : null;
+      const previousResponseTime = previousAttempt?.response_time_ms || null;
+
+      // Calculate time improvement percentage if applicable
+      let timeImprovement = null;
+      if (isCorrect && previousResponseTime && responseTimeMs) {
+        timeImprovement = ((previousResponseTime - responseTimeMs) / previousResponseTime) * 100;
+      }
+
+      // Create encouragement data object
+      const encouragementData = isCorrect ? {
+        wasIncorrectBefore,
+        isFirstTimeCorrect,
+        previousResponseTime,
+        averageResponseTime: statistic.avg_response_time_ms,
+        timeImprovement,
+        correctStreak: isCorrect ? correctStreak : 0,
+        sessionProgress: {
+          completed: session.completed_problems,
+          total: session.total_problems,
+          percentage: (session.completed_problems / session.total_problems) * 100
+        }
+      } : null;
+
+
       // If session is complete, gather all session data with enhanced details
       if (session.is_completed) {
         console.log(`[submitAttempt] Session ${sessionId} is now complete!`);
@@ -347,13 +414,15 @@ export class SessionsController {
           isCorrect,
           correctAnswer,
           isSessionComplete: true,
-          sessionSummary
+          sessionSummary,
+          encouragementData
         });
       } else {
         res.json({
           isCorrect,
           correctAnswer,
-          isSessionComplete: false
+          isSessionComplete: false,
+          encouragementData
         });
       }
     } catch (error) {

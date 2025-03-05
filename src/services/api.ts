@@ -51,11 +51,26 @@ export interface SessionSummary {
   sessionStats: SessionStats;
 }
 
+export interface EncouragementData {
+  wasIncorrectBefore: boolean;
+  isFirstTimeCorrect: boolean;
+  previousResponseTime: number | null;
+  averageResponseTime: number;
+  timeImprovement: number | null;
+  correctStreak: number;
+  sessionProgress: {
+    completed: number;
+    total: number;
+    percentage: number;
+  };
+}
+
 export interface AttemptResult {
   isCorrect: boolean;
   correctAnswer: number;
   isSessionComplete: boolean;
   sessionSummary?: SessionSummary;
+  encouragementData?: EncouragementData | null;
 }
 
 const API_BASE_URL = '/api';

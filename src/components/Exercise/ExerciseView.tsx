@@ -15,6 +15,7 @@ interface ExerciseViewProps {
   isPaused: boolean;
   togglePause: () => void;
   handleNext: () => void;
+  isInteractionDisabled?: boolean; // New prop to disable interactions
 }
 
 /**
@@ -28,7 +29,8 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
   totalProblems,
   isPaused,
   togglePause,
-  handleNext
+  handleNext,
+  isInteractionDisabled = false // Default to false
 }) => {
   const currentProblemIndex = results.findIndex(r => r === null) === -1 
     ? totalProblems - 1 
@@ -53,7 +55,13 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
               </div>
               <button
                 onClick={togglePause}
-                className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex-shrink-0"
+                disabled={isInteractionDisabled}
+                className={`
+                  p-2 rounded-full transition-colors flex-shrink-0
+                  ${isInteractionDisabled 
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                    : 'bg-gray-200 hover:bg-gray-300'}
+                `}
                 aria-label={isPaused ? "Resume" : "Pause"}
               >
                 {isPaused ? (
@@ -83,21 +91,21 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
             <div className="flex gap-2 w-full max-w-md mt-auto">
               <NumericKeyboard
                 value={currentAnswer}
-                onChange={setCurrentAnswer}
-                onSubmit={currentAnswer !== '0' ? handleNext : undefined}
+                onChange={isInteractionDisabled ? () => {} : setCurrentAnswer}
+                onSubmit={currentAnswer !== '0' && !isInteractionDisabled ? handleNext : undefined}
                 maxLength={3}
-                className="flex-1"
+                className={`flex-1 ${isInteractionDisabled ? 'opacity-70 pointer-events-none' : ''}`}
               />
               
               <button
                 onClick={handleNext}
-                disabled={currentAnswer === '0'}
+                disabled={currentAnswer === '0' || isInteractionDisabled}
                 aria-label="Next"
                 className={`
                   w-20 rounded-xl text-xl font-semibold p-3
                   transition-colors duration-150 flex items-center justify-center
                   h-[calc(48px*4+0.5rem*3+1.5rem*2)] sm:h-[calc(56px*4+0.5rem*3+1.5rem*2)] md:h-[calc(64px*4+0.5rem*3+1.5rem*2)]
-                  ${currentAnswer === '0'
+                  ${currentAnswer === '0' || isInteractionDisabled
                     ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     : 'bg-blue-500 text-white hover:bg-blue-600 active:bg-blue-700'}
                 `}
@@ -127,6 +135,11 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
         results={results} 
         totalProblems={totalProblems} 
       />
+
+      {/* Optional overlay to visually indicate UI is disabled */}
+      {isInteractionDisabled && !isPaused && (
+        <div className="absolute inset-0 bg-transparent z-20" aria-hidden="true" />
+      )}
     </div>
   );
 };

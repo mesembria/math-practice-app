@@ -22,7 +22,7 @@ const ProblemDisplay: React.FC<ProblemDisplayProps> = ({
     <div 
       className={`
         flex items-center justify-center
-        min-h-[200px] w-full
+        min-h-[180px] w-full
         bg-white rounded-lg shadow-sm
         ${className}
       `}
