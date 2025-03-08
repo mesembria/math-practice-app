@@ -339,14 +339,17 @@ export class SessionsController {
 
       // Get previous attempts for this specific problem combination
       const previousAttempts = await problemRepository
-        .createQueryBuilder('attempt')
-        .innerJoin('attempt.session', 'session')
-        .where('session.user_id = :userId', { userId: session.user_id })
-        .andWhere('attempt.factor1 = :factor1', { factor1: problem.factor1 })
-        .andWhere('attempt.factor2 = :factor2', { factor2: problem.factor2 })
-        .andWhere('attempt.id != :currentAttemptId', { currentAttemptId: problem.id }) // Exclude current attempt
-        .orderBy('attempt.created_at', 'DESC')
-        .getMany();
+      .createQueryBuilder('attempt')
+      .innerJoin('attempt.session', 'session')
+      .where('session.user_id = :userId', { userId: session.user_id })
+      .andWhere(
+        '(attempt.factor1 = :factor1 AND attempt.factor2 = :factor2) OR ' +
+        '(attempt.factor1 = :factor2 AND attempt.factor2 = :factor1)',
+        { factor1: problem.factor1, factor2: problem.factor2 }
+      )
+      .andWhere('attempt.id != :currentAttemptId', { currentAttemptId: problem.id })
+      .orderBy('attempt.created_at', 'DESC')
+      .getMany();
 
       // Get recent attempts in the current session to determine consecutive correct answers
       const recentSessionAttempts = await problemRepository
@@ -366,10 +369,10 @@ export class SessionsController {
         }
       }
 
-      // Determine if this problem was previously answered incorrectly
-      const wasIncorrectBefore = previousAttempts.some(attempt => 
-        attempt.is_correct === false
-      );
+      // Determine if the most recent previous attempt was incorrect and current is correct
+      const wasIncorrectBefore = isCorrect && 
+        previousAttempts.length > 0 && 
+        previousAttempts[0].is_correct === false;  // Since they're ordered by DESC
 
       // Determine if this is the first time the user answered this problem correctly
       const isFirstTimeCorrect = isCorrect && (

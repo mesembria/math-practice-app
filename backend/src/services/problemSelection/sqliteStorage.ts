@@ -6,7 +6,7 @@ export class SQLiteProblemStateStorage implements ProblemStateStorage {
     async getProblemState(userId: number, normalized: NormalizedProblem): Promise<ProblemStateType> {
         const repository = AppDataSource.getRepository(ProblemState);
         
-        console.log(`\nGetting problem state for user ${userId}, factors: ${normalized.smaller}x${normalized.larger}`);
+        //console.log(`\nGetting problem state for user ${userId}, factors: ${normalized.smaller}x${normalized.larger}`);
         
         try {
             // Always store with smaller factor first for consistency
@@ -23,7 +23,7 @@ export class SQLiteProblemStateStorage implements ProblemStateStorage {
                 .getOne();
 
             if (state) {
-                console.log('Found existing state:', state);
+                //console.log('Found existing state:', state);
                 return {
                     weight: state.weight,
                     lastSeen: state.lastSeen
