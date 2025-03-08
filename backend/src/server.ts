@@ -1,7 +1,6 @@
 import 'reflect-metadata'; // Add this import at the top
 import app from "./app";
 import { AppDataSource } from "./config/database";
-import { User } from "./models/User";
 
 const PORT = process.env.PORT || 3001;
 
