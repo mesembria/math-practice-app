@@ -51,6 +51,10 @@ const LandingPage: React.FC = () => {
     }
   };
 
+  const handleReviewClick = () => {
+    navigate('/review');
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -64,6 +68,16 @@ const LandingPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
+      {/* Header with Review button */}
+      <div className="fixed top-0 right-0 p-4">
+        <button
+          onClick={handleReviewClick}
+          className="bg-[#4285f4] text-white rounded-[15px] w-[80px] h-[30px] flex items-center justify-center text-sm font-medium shadow-sm hover:bg-blue-600 transition-colors"
+        >
+          Review
+        </button>
+      </div>
+      
       <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full">
         <h1 className="text-3xl font-bold text-gray-800 mb-6 text-center">
           Math Practice

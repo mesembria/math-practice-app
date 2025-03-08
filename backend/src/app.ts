@@ -4,6 +4,7 @@ import { json } from "body-parser";
 import dotenv from "dotenv";
 import usersRoutes from "./routes/users.routes";
 import sessionsRoutes from "./routes/sessions.routes";
+import sessionReviewRoutes from "./routes/reviews.routes";
 
 // Load environment variables
 dotenv.config();
@@ -24,6 +25,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Routes
 app.use("/api/users", usersRoutes);
 app.use("/api/sessions", sessionsRoutes);
+app.use("/api", sessionReviewRoutes); // Register new routes (note: path is '/api' because routes already include '/users')
 
 // Health check endpoint
 app.get("/health", (_: Request, res: Response) => {

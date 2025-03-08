@@ -165,7 +165,7 @@ const Exercise: React.FC = () => {
               setError('Failed to load the next problem. Please try again.');
               setIsProcessingAnswer(false);
             }
-          }, 2000); // Match the display duration from useEncouragementMessages
+          }, 1000); // Match the display duration from useEncouragementMessages
         } else {
           // If no encouragement message, fetch next problem immediately
           const nextProblem = await api.getNextProblem(parseInt(sessionId));
