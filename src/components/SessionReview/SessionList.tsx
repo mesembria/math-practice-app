@@ -37,7 +37,6 @@ const SessionList: React.FC<SessionListProps> = ({
   currentPage,
   totalPages,
   onPageChange,
-  onViewSession,
 }) => {
   // Format date string to a more readable format
   const formatDate = (dateString: string): string => {

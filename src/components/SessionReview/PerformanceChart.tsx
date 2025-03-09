@@ -24,8 +24,8 @@ type TooltipPayloadItem = {
   value: number;
   payload: {
     date: string;
-    accuracy: number;
-    responseTime: number;
+    accuracy: number | null;
+    responseTime: number | null;
   };
   color?: string;
   fill?: string;
@@ -79,8 +79,8 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
         
         paddedData.unshift({
           date: placeholderDate.toISOString().split('T')[0],
-          accuracy: null,
-          responseTime: null
+          accuracy: null as unknown as number,
+          responseTime: null as unknown as number
         });
       }
       
@@ -100,7 +100,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
       
       return (
         <div className="bg-white p-2 border border-gray-200 shadow-md rounded-md">
-          <p className="font-medium text-gray-800">{formatDate(label)}</p>
+          <p className="font-medium text-gray-800">{formatDate(label || '')}</p>
           {payload.map((item: TooltipPayloadItem) => {
             if (item.value === null) return null;
             
@@ -127,7 +127,7 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
   // If no data, show placeholder
   if (!dates.length) {
     return (
-      <div className="h-full bg-gray-100 rounded-lg flex items-center justify-center text-gray-500">
+      <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center text-gray-500">
         <p>No performance data available</p>
       </div>
     );
@@ -136,11 +136,11 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
   const chartData = getChartData();
 
   return (
-    <div className="h-full bg-white rounded-lg">
+    <div className="h-64 bg-white rounded-lg">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart
           data={chartData}
-          margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+          margin={{ top: 10, right: 30, left: 0, bottom: 5 }}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#f5f5f5" />
           
@@ -148,20 +148,17 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
             dataKey="date" 
             tickFormatter={formatDate}
             stroke="#9ca3af"
-            tick={{ fontSize: 10 }}
-            tickMargin={5}
-            height={20}
+            tick={{ fontSize: 12 }}
           />
           
           {/* Primary Y-axis for accuracy % */}
           <YAxis
             yAxisId="accuracy"
             domain={[0, 100]}
-            tickCount={5}
+            tickCount={6}
             tickFormatter={(value: number) => `${value}%`}
             stroke="#3b82f6"
-            tick={{ fontSize: 10 }}
-            width={25}
+            tick={{ fontSize: 12 }}
           />
           
           {/* Secondary Y-axis for response time */}
@@ -169,21 +166,18 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
             yAxisId="responseTime"
             orientation="right"
             domain={[0, 'dataMax + 1000']}
-            tickFormatter={(value: number) => `${(value / 1000).toFixed(0)}s`}
+            tickFormatter={(value: number) => `${(value / 1000).toFixed(1)}s`}
             stroke="#ef4444"
-            tick={{ fontSize: 10 }}
-            width={25}
+            tick={{ fontSize: 12 }}
           />
           
           <Tooltip content={<CustomTooltip />} />
           
           <Legend 
             verticalAlign="top" 
-            height={20}
-            iconSize={8}
-            wrapperStyle={{ fontSize: '10px' }}
+            height={36}
             formatter={(value: string) => {
-              return <span className="text-xs font-medium">{value}</span>;
+              return <span className="text-sm font-medium">{value}</span>;
             }}
           />
           
@@ -194,8 +188,8 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
             name="Accuracy"
             stroke="#3b82f6"
             strokeWidth={2}
-            dot={{ r: 3, strokeWidth: 1 }}
-            activeDot={{ r: 5 }}
+            dot={{ r: 4, strokeWidth: 1 }}
+            activeDot={{ r: 6 }}
             connectNulls
           />
           
@@ -206,8 +200,8 @@ const PerformanceChart: React.FC<PerformanceChartProps> = ({
             name="Response Time"
             stroke="#ef4444"
             strokeWidth={2}
-            dot={{ r: 3, strokeWidth: 1 }}
-            activeDot={{ r: 5 }}
+            dot={{ r: 4, strokeWidth: 1 }}
+            activeDot={{ r: 6 }}
             connectNulls
           />
         </LineChart>

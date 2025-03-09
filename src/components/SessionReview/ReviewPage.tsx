@@ -65,7 +65,7 @@ const ReviewPage: React.FC = () => {
   
   // Loading and error states
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error] = useState<string | null>(null);
 
   // Fetch data when user or page changes
   useEffect(() => {
