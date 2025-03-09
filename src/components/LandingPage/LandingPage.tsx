@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 
+// Storage key for localStorage
+const LAST_SELECTED_USER_KEY = 'math-practice-last-user';
+
 interface User {
   id: number;
   name: string;
@@ -19,11 +22,24 @@ const LandingPage: React.FC = () => {
   // Preset values for number of problems
   const problemPresets = [5, 10, 15, 20, 25];
 
+  // Load users and restore the last selected user
   useEffect(() => {
     const fetchUsers = async () => {
       try {
+        setIsLoading(true);
         const fetchedUsers = await api.getUsers();
         setUsers(fetchedUsers);
+        
+        // Try to get the last selected user from localStorage
+        const lastUserId = localStorage.getItem(LAST_SELECTED_USER_KEY);
+        if (lastUserId) {
+          const parsedId = parseInt(lastUserId);
+          // Only set if the user exists in the fetched users
+          if (fetchedUsers.some(user => user.id === parsedId)) {
+            setSelectedUserId(parsedId);
+          }
+        }
+        
         setIsLoading(false);
       } catch (err: unknown) {
         console.error('Error fetching users:', err);
@@ -34,6 +50,13 @@ const LandingPage: React.FC = () => {
 
     fetchUsers();
   }, []);
+
+  // Update localStorage when user selection changes
+  useEffect(() => {
+    if (selectedUserId !== null) {
+      localStorage.setItem(LAST_SELECTED_USER_KEY, selectedUserId.toString());
+    }
+  }, [selectedUserId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -30,6 +30,15 @@ const UserSelector: React.FC<UserSelectorProps> = ({
         setIsLoading(true);
         const fetchedUsers = await api.getUsers();
         setUsers(fetchedUsers);
+        
+        // If we have a selectedUserId but it's not in the user list, clear selection
+        if (selectedUserId && !fetchedUsers.some(user => user.id === selectedUserId)) {
+          onUserChange(fetchedUsers[0]?.id || 0);
+        } else if (!selectedUserId && fetchedUsers.length > 0) {
+          // If no user is selected and we have users, select the first one
+          onUserChange(fetchedUsers[0].id);
+        }
+        
         setIsLoading(false);
       } catch (err) {
         console.error('Error fetching users:', err);
@@ -39,7 +48,7 @@ const UserSelector: React.FC<UserSelectorProps> = ({
     };
 
     fetchUsers();
-  }, []);
+  }, [selectedUserId, onUserChange]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const userId = parseInt(e.target.value);
@@ -50,7 +59,6 @@ const UserSelector: React.FC<UserSelectorProps> = ({
 
   return (
     <div className={`w-[150px] ${className}`}>
- 
       <div className="relative">
         <select
           id="user-select"

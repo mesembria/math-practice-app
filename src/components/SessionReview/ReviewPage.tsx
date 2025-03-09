@@ -6,6 +6,9 @@ import SessionList from './SessionList';
 import PerformanceSummary from './PerformanceSummary';
 import { api } from '../../services/api';
 
+// Same storage key as in LandingPage for consistency
+const LAST_SELECTED_USER_KEY = 'math-practice-last-user';
+
 // Session review data interface based on API schema
 interface ReviewData {
   summary: {
@@ -65,12 +68,25 @@ const ReviewPage: React.FC = () => {
   
   // Loading and error states
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load the last selected user from localStorage on component mount
+  useEffect(() => {
+    const lastUserId = localStorage.getItem(LAST_SELECTED_USER_KEY);
+    if (lastUserId) {
+      const parsedId = parseInt(lastUserId);
+      if (!isNaN(parsedId)) {
+        setSelectedUserId(parsedId);
+      }
+    }
+  }, []);
 
   // Fetch data when user or page changes
   useEffect(() => {
     if (selectedUserId) {
       setIsLoading(true);
+      setError(null);
+      
       // Fetch data
       api.getUserSessions(selectedUserId)
         .then(data => {
@@ -78,7 +94,8 @@ const ReviewPage: React.FC = () => {
           setIsLoading(false);
         })
         .catch(err => {
-          console.error(err);
+          console.error('Error fetching user sessions:', err);
+          setError('Failed to load user sessions. Please try again.');
           setIsLoading(false);
         });
     }
@@ -88,6 +105,9 @@ const ReviewPage: React.FC = () => {
   const handleUserChange = (userId: number) => {
     setSelectedUserId(userId);
     setCurrentPage(1); // Reset to first page when changing user
+    
+    // Update localStorage with the new selection
+    localStorage.setItem(LAST_SELECTED_USER_KEY, userId.toString());
   };
 
   // Handle page change
