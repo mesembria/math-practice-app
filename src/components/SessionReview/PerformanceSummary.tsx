@@ -116,24 +116,24 @@ const PerformanceSummary: React.FC<PerformanceSummaryProps> = ({
         </div>
       )}
       
-      {/* Performance Trend Chart - shrinks vertically as needed */}
-      <div className="mb-4">
+      {/* Performance Trend Chart */}
+      <div className="mb-6">
         <h3 className="text-lg font-medium mb-2">Performance Trend</h3>
         {renderContent(
           'Performance Trend Chart',
-            <div className="h-32 sm:h-40 md:h-48">
+            <div className="h-48 md:h-64">
               <PerformanceChart 
                 dates={data?.trends?.sessions || []}
                 accuracy={data?.trends?.accuracy || []}
                 responseTime={data?.trends?.responseTime || []}
               />
             </div>,
-          'h-32 sm:h-40 md:h-48'
+          'h-48 md:h-64'
         )}
       </div>
       
-      {/* Problem Performance Section - Two columns on smaller screens */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Problem Performance Section - Two columns side by side */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
         {/* Most Challenging Problems */}
         <div>
           <h3 className="text-lg font-medium mb-2">Most Challenging Problems</h3>
@@ -143,7 +143,7 @@ const PerformanceSummary: React.FC<PerformanceSummaryProps> = ({
               problems={data?.challengingProblems || []}
               type="challenging"
             />,
-            'min-h-[120px] max-h-[180px]'
+            'min-h-[180px] max-h-[200px]'
           )}
         </div>
         
@@ -156,7 +156,7 @@ const PerformanceSummary: React.FC<PerformanceSummaryProps> = ({
               problems={data?.slowestProblems || []}
               type="slowest"
             />,
-            'min-h-[120px] max-h-[180px]'
+            'min-h-[180px] max-h-[200px]'
           )}
         </div>
       </div>
