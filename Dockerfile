@@ -12,9 +12,6 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Set base path for production build
-ENV BASE_PATH=/math
-
 # Build the application using Vite (which handles TypeScript compilation)
 RUN npm run build
 
