@@ -3,11 +3,15 @@ import { configDefaults } from 'vitest/config'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
+// Determine if we should use the subpath in the build
+const basePath = process.env.BASE_PATH || '';
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
     react()
   ],
+  base: basePath, // This will prefix all asset URLs
   server: {
     proxy: {
       '/api': {
