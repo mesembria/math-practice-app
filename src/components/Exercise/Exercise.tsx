@@ -105,82 +105,88 @@ const Exercise: React.FC = () => {
     fetchSessionAndProblem();
   }, [sessionId, setStartTime]);
 
-  // Handle answer submission
-  const handleNext = async () => {
-    if (!currentProblem || !sessionId || isPaused || isProcessingAnswer) return;
+// Handle answer submission
+const handleNext = async () => {
+  if (!currentProblem || !sessionId || isPaused || isProcessingAnswer) return;
 
-    // Start the processing state - will disable input during encouragement display
-    setIsProcessingAnswer(true);
-    const responseTimeMs = calculateResponseTime();
-    
-    try {
-      const result = await api.submitAttempt(
-        parseInt(sessionId),
-        currentProblem.problemId,
-        parseInt(currentAnswer),
-        responseTimeMs
-      );
+  // Start the processing state - will disable input during encouragement display
+  setIsProcessingAnswer(true);
+  const responseTimeMs = calculateResponseTime();
+  
+  try {
+    const result = await api.submitAttempt(
+      parseInt(sessionId),
+      currentProblem.problemId,
+      parseInt(currentAnswer),
+      responseTimeMs
+    );
 
-      // Update results at current index
-      const newResults = [...results];
-      const currentIndex = newResults.findIndex(r => r === null);
-      if (currentIndex !== -1) {
-        newResults[currentIndex] = result.isCorrect;
-        setResults(newResults);
-      }
+    // Update results at current index
+    const newResults = [...results];
+    const currentIndex = newResults.findIndex(r => r === null);
+    if (currentIndex !== -1) {
+      newResults[currentIndex] = result.isCorrect;
+      setResults(newResults);
+    }
 
-      // Update correct count
-      if (result.isCorrect) {
-        setCorrectCount(prev => prev + 1);
-      }
+    // Update correct count
+    if (result.isCorrect) {
+      setCorrectCount(prev => prev + 1);
+    }
 
-      // Process encouragement data if available
-      if (result.encouragementData) {
-        processEncouragementData(result.encouragementData);
-      }
+    // Handle session completion
+    if (result.isSessionComplete && result.sessionSummary) {
+      // Show completion message briefly before showing full summary
+      setShowCompletionMessage(true);
+      setIsComplete(true);
+      setSessionSummary(result.sessionSummary);
+      
+      // After 2 seconds, hide the completion message to show the full summary
+      setTimeout(() => {
+        setShowCompletionMessage(false);
+      }, 2000);
+      return; // Exit early for completed sessions
+    }
 
-      if (result.isSessionComplete && result.sessionSummary) {
-        // Show completion message briefly before showing full summary
-        setShowCompletionMessage(true);
-        setIsComplete(true);
-        setSessionSummary(result.sessionSummary);
-        
-        // After 2 seconds, hide the completion message to show the full summary
-        setTimeout(() => {
-          setShowCompletionMessage(false);
-        }, 2000);
-      } else {
-        // If we're showing an encouragement message, wait for it to finish
-        if (result.encouragementData && result.isCorrect) {
-          // Wait for the encouragement message to display before fetching next problem
-          setTimeout(async () => {
-            try {
-              const nextProblem = await api.getNextProblem(parseInt(sessionId));
-              setCurrentProblem(nextProblem);
-              setCurrentAnswer('0');
-              resetTimer();
-              setIsProcessingAnswer(false);
-            } catch (err) {
-              console.error('Error fetching next problem:', err);
-              setError('Failed to load the next problem. Please try again.');
-              setIsProcessingAnswer(false);
-            }
-          }, 1000); // Match the display duration from useEncouragementMessages
-        } else {
-          // If no encouragement message, fetch next problem immediately
+    // Process encouragement data if available
+    const shouldShowEncouragement = result.encouragementData && result.isCorrect;
+    if (shouldShowEncouragement && result.encouragementData) {
+      processEncouragementData(result.encouragementData);
+      
+      // For encouragement messages, set a shorter delay (700ms instead of 1000ms)
+      setTimeout(async () => {
+        try {
           const nextProblem = await api.getNextProblem(parseInt(sessionId));
           setCurrentProblem(nextProblem);
           setCurrentAnswer('0');
           resetTimer();
           setIsProcessingAnswer(false);
+        } catch (err) {
+          console.error('Error fetching next problem:', err);
+          setError('Failed to load the next problem. Please try again.');
+          setIsProcessingAnswer(false);
         }
+      }, 700); // Reduced from 1000ms to 700ms for a more responsive feel
+    } else {
+      // If no encouragement message, fetch next problem immediately with no delay
+      try {
+        const nextProblem = await api.getNextProblem(parseInt(sessionId));
+        setCurrentProblem(nextProblem);
+        setCurrentAnswer('0');
+        resetTimer();
+        setIsProcessingAnswer(false);
+      } catch (err) {
+        console.error('Error fetching next problem:', err);
+        setError('Failed to load the next problem. Please try again.');
+        setIsProcessingAnswer(false);
       }
-    } catch (err: unknown) {
-      console.error('Error submitting attempt:', err);
-      setError('Failed to submit answer. Please try again.');
-      setIsProcessingAnswer(false);
     }
-  };
+  } catch (err) {
+    console.error('Error submitting attempt:', err);
+    setError('Failed to submit answer. Please try again.');
+    setIsProcessingAnswer(false);
+  }
+};
 
   // Handle encouragement message complete
   const handleMessageComplete = () => {

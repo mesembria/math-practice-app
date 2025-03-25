@@ -48,7 +48,12 @@ const messageTemplates: Record<MessageType, MessageTemplate[]> = {
   [MessageType.FASTER_THAN_LAST_TIME]: [
     { text: "Speedy work! Faster than last time!", emoji: "🚀" },
     { text: "Zoom! You're getting quicker!", emoji: "⚡" },
-    { text: "Wow! Your brain is working super fast today!", emoji: "🏎️" }
+    { text: "Wow! Your brain is working super fast today!", emoji: "🏎️" },
+    { text: "You solved that quicker than before!", emoji: "⏱️" },
+    { text: "Look at you speeding up! Impressive!", emoji: "🔥" },
+    { text: "You beat your previous time!", emoji: "🎯" },
+    { text: "Getting faster with practice!", emoji: "💨" },
+    { text: "Speedier than before! Great job!", emoji: "🏆" }
   ],
   [MessageType.SIGNIFICANT_IMPROVEMENT]: [
     { text: "Incredible! 20% faster than before!", emoji: "🚀" }, // 20-29%
@@ -59,7 +64,13 @@ const messageTemplates: Record<MessageType, MessageTemplate[]> = {
   [MessageType.FASTER_THAN_AVERAGE]: [
     { text: "Quicker than usual! Great job!", emoji: "⏱️" },
     { text: "Speedier than your average! Wow!", emoji: "🏁" },
-    { text: "You're on fire today! So fast!", emoji: "🔥" }
+    { text: "You're on fire today! So fast!", emoji: "🔥" },
+    { text: "Above average speed! Impressive!", emoji: "✨" },
+    { text: "Faster than your normal pace!", emoji: "⚡" },
+    { text: "You're beating your average time!", emoji: "🏅" },
+    { text: "Super quick! Better than average!", emoji: "🚀" },
+    { text: "Breaking speed records today!", emoji: "📈" },
+    { text: "Wow! That was faster than usual!", emoji: "💫" }
   ],
   [MessageType.SESSION_PROGRESS]: [
     { text: "Halfway there! You're doing great!", emoji: "🏔️" }, // 50%
@@ -72,9 +83,22 @@ const messageTemplates: Record<MessageType, MessageTemplate[]> = {
     { text: "Look at you bounce back! Awesome!", emoji: "🦘" }
   ],
   [MessageType.CONSECUTIVE_CORRECT]: [
+    // 5 in a row
     { text: "5 correct in a row! You're on fire!", emoji: "🔥" },
     { text: "High five! That's 5 correct answers!", emoji: "✋" },
-    { text: "Wow! 5 perfect answers in a row!", emoji: "🎯" }
+    { text: "Wow! 5 perfect answers in a row!", emoji: "🎯" },
+    // 10 in a row
+    { text: "10 correct in a row! Super streak!", emoji: "⚡" },
+    { text: "Ten perfect answers! Math genius!", emoji: "🧠" },
+    { text: "Fantastic! 10 in a row! Unstoppable!", emoji: "🔥" },
+    // 15 in a row
+    { text: "15 correct in a row! Incredible!", emoji: "✨" },
+    { text: "Math champion! 15 perfect answers!", emoji: "🏆" },
+    { text: "15 in a row! You're in the zone!", emoji: "🌟" },
+    // 20 in a row
+    { text: "20 correct in a row! LEGENDARY!", emoji: "👑" },
+    { text: "Math master! 20 perfect answers!", emoji: "🌠" },
+    { text: "20 streak! That's math perfection!", emoji: "💯" }
   ]
 };
 
@@ -82,13 +106,13 @@ const messageTemplates: Record<MessageType, MessageTemplate[]> = {
 interface EncouragementConfig {
   displayDuration?: number; // Duration to show message in ms
   significantImprovementThresholds?: number[]; // Thresholds for time improvement
-  consecutiveCorrectThreshold?: number; // Number of consecutive correct answers needed
+  consecutiveCorrectThresholds?: number[]; // Thresholds for consecutive correct answers
 }
 
 const defaultConfig: EncouragementConfig = {
   displayDuration: 2000, // 2 seconds
   significantImprovementThresholds: [20, 30, 40, 50], // 20%, 30%, 40%, 50%
-  consecutiveCorrectThreshold: 5 // 5 consecutive correct
+  consecutiveCorrectThresholds: [5, 10, 15, 20] // 5, 10, 15, 20 consecutive correct
 };
 
 // The hook interface
@@ -154,6 +178,25 @@ export const useEncouragementMessages = (
     return null;
   }, [getRandomMessage]);
 
+  // Get the message for consecutive correct answers based on the streak count
+  const getConsecutiveCorrectMessage = useCallback((streak: number): string | null => {
+    const templates = messageTemplates[MessageType.CONSECUTIVE_CORRECT];
+    const thresholds = mergedConfig.consecutiveCorrectThresholds || [];
+    
+    // Skip if streak doesn't match any of our thresholds
+    if (!thresholds.includes(streak)) {
+      return null;
+    }
+    
+    // Select message templates for the specific streak milestone
+    const thresholdIndex = thresholds.indexOf(streak);
+    const startIndex = thresholdIndex * 3; // Each milestone has 3 message templates
+    const endIndex = startIndex + 3;
+    const milestoneTemplates = templates.slice(startIndex, endIndex);
+    
+    return getRandomMessage(milestoneTemplates);
+  }, [mergedConfig.consecutiveCorrectThresholds, getRandomMessage]);
+
   // Select the encouragement message based on priority order
   const selectEncouragementMessage = useCallback((data: EncouragementData): string | null => {
     if (!data) return null;
@@ -168,23 +211,28 @@ export const useEncouragementMessages = (
       return getRandomMessage(messageTemplates[MessageType.FIRST_TIME_MASTERY]);
     }
     
-    // 3. Faster Than Last Time with Significant Improvement
+    // 3. Consecutive Correct Answers (moved up in priority)
+    if (data.correctStreak && mergedConfig.consecutiveCorrectThresholds!.includes(data.correctStreak)) {
+      return getConsecutiveCorrectMessage(data.correctStreak);
+    }
+    
+    // 4. Faster Than Last Time with Significant Improvement
     if (data.timeImprovement && data.timeImprovement > mergedConfig.significantImprovementThresholds![0]) {
       return getSignificantImprovementMessage(data.timeImprovement);
     }
     
-    // 4. Faster Than Last Time (any improvement)
+    // 5. Faster Than Last Time (any improvement)
     if (data.timeImprovement && data.timeImprovement > 0) {
       return getRandomMessage(messageTemplates[MessageType.FASTER_THAN_LAST_TIME]);
     }
     
-    // 5. Faster Than Average
+    // 6. Faster Than Average
     if (data.averageResponseTime && data.previousResponseTime && 
         data.previousResponseTime < data.averageResponseTime) {
       return getRandomMessage(messageTemplates[MessageType.FASTER_THAN_AVERAGE]);
     }
     
-    // 6. Session Progress (milestone reached)
+    // 7. Session Progress (milestone reached)
     if (data.sessionProgress) {
       const progressMessage = getSessionProgressMessage(data.sessionProgress.percentage);
       if (progressMessage) {
@@ -192,15 +240,11 @@ export const useEncouragementMessages = (
       }
     }
     
-    // 7. Recovery Recognition (after a mistake)
+    // 8. Recovery Recognition (after a mistake)
     // This is for when they've recovered from previous mistakes and are now getting answers correct
-    if (data.correctStreak && data.correctStreak >= 2 && data.correctStreak < mergedConfig.consecutiveCorrectThreshold!) {
+    if (data.correctStreak && data.correctStreak >= 2 && 
+        !mergedConfig.consecutiveCorrectThresholds!.includes(data.correctStreak)) {
       return getRandomMessage(messageTemplates[MessageType.RECOVERY_RECOGNITION]);
-    }
-    
-    // 8. Consecutive Correct Answers
-    if (data.correctStreak && data.correctStreak >= mergedConfig.consecutiveCorrectThreshold!) {
-      return getRandomMessage(messageTemplates[MessageType.CONSECUTIVE_CORRECT]);
     }
     
     return null;
@@ -208,7 +252,8 @@ export const useEncouragementMessages = (
     getRandomMessage,
     getSignificantImprovementMessage,
     getSessionProgressMessage,
-    mergedConfig.consecutiveCorrectThreshold,
+    getConsecutiveCorrectMessage,
+    mergedConfig.consecutiveCorrectThresholds,
     mergedConfig.significantImprovementThresholds
   ]);
 
