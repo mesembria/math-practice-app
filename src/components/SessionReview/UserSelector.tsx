@@ -1,4 +1,3 @@
-// src/components/SessionReview/UserSelector.tsx
 import React, { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 
@@ -12,24 +11,37 @@ interface UserSelectorProps {
   selectedUserId: number | null;
   onUserChange: (userId: number) => void;
   className?: string;
+  users?: User[]; // Allow passing users from parent
+  isLoading?: boolean; // Allow passing loading state
 }
 
 const UserSelector: React.FC<UserSelectorProps> = ({ 
   selectedUserId, 
   onUserChange,
-  className = '' 
+  className = '',
+  users: externalUsers, // Renamed to avoid name collision
+  isLoading: externalLoading
 }) => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [internalUsers, setInternalUsers] = useState<User[]>([]);
+  const [isInternalLoading, setIsInternalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Use external users if provided, otherwise use internal state
+  const users = externalUsers || internalUsers;
+  const isLoading = externalLoading !== undefined ? externalLoading : isInternalLoading;
 
-  // Fetch users when component mounts
+  // Only fetch users when component mounts if external users are not provided
   useEffect(() => {
+    // Skip if external users are provided
+    if (externalUsers) {
+      return;
+    }
+    
     const fetchUsers = async () => {
       try {
-        setIsLoading(true);
+        setIsInternalLoading(true);
         const fetchedUsers = await api.getUsers();
-        setUsers(fetchedUsers);
+        setInternalUsers(fetchedUsers);
         
         // If we have a selectedUserId but it's not in the user list, clear selection
         if (selectedUserId && !fetchedUsers.some(user => user.id === selectedUserId)) {
@@ -39,16 +51,16 @@ const UserSelector: React.FC<UserSelectorProps> = ({
           onUserChange(fetchedUsers[0].id);
         }
         
-        setIsLoading(false);
+        setIsInternalLoading(false);
       } catch (err) {
         console.error('Error fetching users:', err);
         setError('Failed to load users');
-        setIsLoading(false);
+        setIsInternalLoading(false);
       }
     };
 
     fetchUsers();
-  }, [selectedUserId, onUserChange]);
+  }, []); // Only run once on mount, remove dependencies that cause re-fetching
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const userId = parseInt(e.target.value);

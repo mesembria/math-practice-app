@@ -1,8 +1,11 @@
+// src/models/ExerciseSession.ts
+
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, OneToMany, JoinColumn } from "typeorm";
-import { IExerciseSession, IUser, IProblemAttempt } from "./types";
+import { User } from "./User";
+import { ProblemAttempt } from "./ProblemAttempt";
 
 @Entity("exercise_sessions")
-export class ExerciseSession implements IExerciseSession {
+export class ExerciseSession {
   @PrimaryGeneratedColumn()
   id: number;
 
@@ -23,11 +26,14 @@ export class ExerciseSession implements IExerciseSession {
 
   @Column({ default: false })
   is_completed: boolean;
+  
+  @Column({ name: "problem_type", type: "varchar", nullable: true, default: "multiplication" })
+  problem_type: string;
 
-  @ManyToOne("User", "sessions")
+  @ManyToOne(() => User, user => user.sessions)
   @JoinColumn({ name: "user_id" })
-  user: IUser;
+  user: User;
 
-  @OneToMany("ProblemAttempt", "session")
-  attempts: IProblemAttempt[];
+  @OneToMany(() => ProblemAttempt, attempt => attempt.session)
+  attempts: ProblemAttempt[];
 }

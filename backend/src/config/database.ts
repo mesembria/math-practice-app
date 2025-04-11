@@ -1,3 +1,4 @@
+// src/config/database.ts
 import { DataSource } from "typeorm";
 import path from "path";
 import fs from "fs";
@@ -13,11 +14,9 @@ const getDbPath = () => {
     return ":memory:";
   }
   
-  // Use DB_PATH environment variable if set, otherwise use the default path
   const dbPath = process.env.DB_PATH || path.join(__dirname, "../../data/math-practice.sqlite");
   console.log(`Using database path: ${dbPath}`);
   
-  // Create the directory if it doesn't exist
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
     console.log(`Creating database directory: ${dbDir}`);
@@ -25,6 +24,17 @@ const getDbPath = () => {
   }
   
   return dbPath;
+};
+
+// Determine migrations path based on environment
+const getMigrationsPath = () => {
+  // In development, use TypeScript files
+  if (process.env.NODE_ENV === "development") {
+    return path.join(__dirname, "../migrations/**/*.ts");
+  }
+  
+  // In production, use compiled JavaScript files
+  return path.join(__dirname, "../migrations/**/*.js");
 };
 
 export const AppDataSource = new DataSource({
@@ -39,7 +49,9 @@ export const AppDataSource = new DataSource({
   ],
   synchronize: process.env.NODE_ENV === "development",
   logging: process.env.NODE_ENV === "development",
-  migrations: [path.join(__dirname, "../migrations/*.ts")],
+  migrations: [getMigrationsPath()],
+  migrationsTableName: "migrations",
+  migrationsRun: false, // We'll run migrations manually
 });
 
 // Create data directory if it doesn't exist

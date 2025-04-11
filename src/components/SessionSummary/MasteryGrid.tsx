@@ -1,28 +1,52 @@
+// src/components/SessionSummary/MasteryGrid.tsx
 import React from 'react';
-import { ProblemWeight } from '../../services/api';
+import { ProblemType } from '../../services/api';
 import { getWeightColor } from './utils/formatters';
 
-interface MasteryGridProps {
-  problemWeights: ProblemWeight[];
+// Define a type that matches what's coming from the backend/SessionSummary
+interface ProblemWeightItem {
+  factor1: number;
+  factor2: number;
+  weight: number;
+  problemType?: ProblemType; // Make this optional to match actual data
 }
 
-const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
+interface MasteryGridProps {
+  problemWeights: ProblemWeightItem[]; // Use our flexible type here
+  problemType: ProblemType;
+}
+
+const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights, problemType }) => {
+  // Filter weights to only show the ones for the current problem type
+  // If problemType is not present on weights (older API response), show all weights
+  const filteredWeights = problemWeights.filter(weight => 
+    !('problemType' in weight) || weight.problemType === problemType || weight.problemType === undefined
+  );
+  
+  // Use 12x12 grid for both multiplication and missing factor types (factors 2-12)
+  // This makes the grid consistent across problem types
+  const minFactor = 2;
+  const maxFactor = 12; // Always use 12 as max factor for both types
+  
+  // Generate an array of factors to display in the grid
+  const factors = Array.from({ length: maxFactor - minFactor + 1 }, (_, i) => i + minFactor);
+  
   return (
     <div className="bg-white rounded-xl shadow-md p-2 border border-gray-100">
-
-      
-      {/* Compact responsive grid */}
-      <div className="grid grid-cols-10 gap-px bg-gray-100 rounded-lg overflow-hidden">
+      {/* Compact responsive grid - now uses 11 columns for both types (11 = 12-2+1) */}
+      <div className="grid grid-cols-[auto_repeat(11,1fr)] gap-px bg-gray-100 rounded-lg overflow-hidden">
         {/* Column headers */}
-        <div className="text-center font-medium text-gray-600 p-0.5 bg-gray-50 text-xs">×</div>
-        {[2,3,4,5,6,7,8,9,10].map(num => (
+        <div className="text-center font-medium text-gray-600 p-0.5 bg-gray-50 text-xs">
+          {problemType === ProblemType.MISSING_FACTOR ? 'M' : '×'}
+        </div>
+        {factors.map(num => (
           <div key={num} className="text-center font-medium text-gray-600 p-0.5 bg-gray-50 text-xs">
             {num}
           </div>
         ))}
         
         {/* Grid rows */}
-        {[2,3,4,5,6,7,8,9,10].map(row => (
+        {factors.map(row => (
           <React.Fragment key={row}>
             {/* Row header */}
             <div className="text-center font-medium text-gray-600 p-0.5 bg-gray-50 text-xs">
@@ -30,9 +54,9 @@ const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
             </div>
             
             {/* Cells */}
-            {[2,3,4,5,6,7,8,9,10].map(col => {
+            {factors.map(col => {
               // Find the weight for this problem combination
-              const weight = problemWeights.find(
+              const weight = filteredWeights.find(
                 w => (w.factor1 === row && w.factor2 === col) ||
                      (w.factor1 === col && w.factor2 === row)
               );
@@ -41,7 +65,7 @@ const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
               const cellColor = weight ? getWeightColor(weight.weight) : 'rgb(229, 231, 235)';
               const product = row * col;
               
-              // Create descriptive tooltip text
+              // Create descriptive tooltip text based on problem type
               let masteryStatus = 'No practice data yet';
               if (weight) {
                 if (weight.weight < 5) masteryStatus = 'Well mastered';
@@ -51,7 +75,9 @@ const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
                 else masteryStatus = 'Needs focused attention';
               }
               
-              const tooltipText = `${row} × ${col} = ${product}\n${masteryStatus}${weight ? ` (weight: ${weight.weight.toFixed(1)})` : ''}`;
+              const tooltipText = problemType === ProblemType.MISSING_FACTOR 
+                ? `Missing factor: ${row} × ? = ${product} or ? × ${col} = ${product}\n${masteryStatus}${weight ? ` (weight: ${weight.weight.toFixed(1)})` : ''}`
+                : `${row} × ${col} = ${product}\n${masteryStatus}${weight ? ` (weight: ${weight.weight.toFixed(1)})` : ''}`;
               
               // For problematic cells, add a highlight
               const isNeedsPractice = weight && weight.weight > 12;
@@ -60,7 +86,7 @@ const MasteryGrid: React.FC<MasteryGridProps> = ({ problemWeights }) => {
               return (
                 <div
                   key={`${row}-${col}`}
-                  className="relative w-full aspect-square flex items-center justify-center text-xs font-medium text-gray-700"
+                  className={`relative w-full aspect-square flex items-center justify-center text-xs font-medium text-gray-700 ${problemType === ProblemType.MISSING_FACTOR ? 'border border-transparent' : ''}`}
                   style={{ backgroundColor: cellColor }}
                   title={tooltipText}
                 >
