@@ -1,3 +1,5 @@
+// src/models/ProblemState.ts
+
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, BeforeInsert, BeforeUpdate, Check } from "typeorm";
 import { User } from "./User";
 
@@ -7,13 +9,13 @@ export class ProblemState {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @Column({ name: "user_id", type: "int" }) // Explicitly define the column type
+    @Column({ name: "user_id", type: "int" })
     userId: number;
 
-    @Column({ type: "int" }) // Explicitly define the column type
+    @Column({ type: "int" })
     factor1: number;
 
-    @Column({ type: "int" }) // Explicitly define the column type
+    @Column({ type: "int" })
     factor2: number;
 
     @Column({ type: "float", default: 10 })
@@ -21,6 +23,12 @@ export class ProblemState {
 
     @Column({ name: "last_seen", type: "bigint", default: 0 })
     lastSeen: number;
+    
+    @Column({ name: "problem_type", type: "varchar", default: "multiplication" })
+    problemType: string;
+
+    @Column({ name: "missing_operand_position", type: "varchar", nullable: true })
+    missingOperandPosition: string | null;
 
     @ManyToOne(() => User, { onDelete: "CASCADE" })
     @JoinColumn({ name: "user_id" })

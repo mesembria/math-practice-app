@@ -1,26 +1,27 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from "typeorm";
-import { IUser, IExerciseSession, IProblemStatistic } from "./types";
+import { ExerciseSession } from "./ExerciseSession";
+import { ProblemStatistic } from "./ProblemStatistic";
 
 @Entity("users")
-export class User implements IUser {
+export class User {
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   @Column({ type: 'varchar' })
-  name: string;
+  name!: string;
 
   @Column({ type: 'boolean', default: false })
-  is_parent: boolean;
+  is_parent!: boolean;
 
   @Column({ type: 'int', default: 1 })
-  current_level: number;
+  current_level!: number;
 
   @CreateDateColumn()
-  created_at: Date;
+  created_at!: Date;
 
-  @OneToMany("ExerciseSession", "user")
-  sessions: IExerciseSession[];
+  @OneToMany(() => ExerciseSession, session => session.user)
+  sessions!: ExerciseSession[];
 
-  @OneToMany("ProblemStatistic", "user")
-  statistics: IProblemStatistic[];
+  @OneToMany(() => ProblemStatistic, statistic => statistic.user)
+  statistics!: ProblemStatistic[];
 }

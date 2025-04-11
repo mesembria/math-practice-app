@@ -1,5 +1,3 @@
-// Refactored code for backend/src/controllers/sessions.controller.ts
-
 import { RequestHandler } from 'express';
 import { AppDataSource } from '../config/database';
 import { ExerciseSession } from '../models/ExerciseSession';
@@ -7,7 +5,16 @@ import { ProblemAttempt } from '../models/ProblemAttempt';
 import { ProblemStatistic } from '../models/ProblemStatistic';
 import { User } from '../models/User';
 import { problemSelector } from '../services/problemSelection/selection';
-import { ProblemHistory, DEFAULT_CONFIG } from '../services/problemSelection/types';
+import { DEFAULT_CONFIG, MISSING_FACTOR_CONFIG, ProblemType, Problem } from '../models/types';
+
+interface ProblemResponse {
+  problemId: number;
+  factor1: number | null;
+  factor2: number | null;
+  problemType: string;
+  missingOperandPosition: string | null;
+  product?: number; // Optional product field
+}
 
 // Helper function to gather session summary data
 async function generateSessionSummary(sessionId: number) {
@@ -38,12 +45,14 @@ async function generateSessionSummary(sessionId: number) {
     .innerJoin('attempt.session', 'session')
     .select('attempt.factor1', 'factor1')
     .addSelect('attempt.factor2', 'factor2')
+    .addSelect('attempt.problem_type', 'problemType')
     .addSelect('AVG(attempt.response_time_ms)', 'avgTime')
     .where('session.user_id = :userId', { userId: session.user_id })
     .andWhere('attempt.response_time_ms IS NOT NULL')
     .andWhere('attempt.is_correct = 1')
     .groupBy('attempt.factor1')
     .addGroupBy('attempt.factor2')
+    .addGroupBy('attempt.problem_type')
     .getRawMany();
 
   // Normalize factors after retrieving data
@@ -52,19 +61,70 @@ async function generateSessionSummary(sessionId: number) {
       const smaller = Math.min(avg.factor1, avg.factor2);
       const larger = Math.max(avg.factor1, avg.factor2);
       return [
-        `${smaller}x${larger}`,
+        `${smaller}x${larger}x${avg.problemType}`,
         parseFloat(avg.avgTime)
       ];
     })
   );
 
-  // Get all problem weights for this user
-  const allWeights = [];
-  const config = DEFAULT_CONFIG;
+// Update in src/controllers/sessions.controller.ts
+// In the generateSessionSummary function, update this section:
+
+// Get all problem weights for this user
+const allWeights = [];
+
+// Use appropriate config based on session's problem type
+const problemType = session.problem_type || 'multiplication';
+const config = problemType === 'missing_factor' 
+  ? MISSING_FACTOR_CONFIG 
+  : DEFAULT_CONFIG;
+
+console.log(`[generateSessionSummary] Getting weights for problem type: ${problemType}, factor range: ${config.minFactor}-${config.maxFactor}`);
+
+if (problemType === 'missing_factor') {
+  // For missing factor problems, we need to retrieve weights for both missing operand positions
+  const positions = ['first', 'second'];
   
+  for (const missingPosition of positions) {
+    for (let i = config.minFactor; i <= config.maxFactor; i++) {
+      for (let j = i; j <= config.maxFactor; j++) {
+        // Get weight for this specific combination including missing operand position
+        const state = await problemSelector.getProblemState(session.user_id, { 
+          factor1: i, 
+          factor2: j,
+          problemType: problemType as ProblemType,
+          missingOperandPosition: missingPosition as 'first' | 'second' 
+        });
+        
+        // Add weights with information about missing operand position
+        allWeights.push({
+          factor1: i,
+          factor2: j,
+          weight: state.weight,
+          missingOperandPosition: missingPosition
+        });
+        
+        // Skip adding duplicate for equal factors
+        if (i !== j) {
+          allWeights.push({
+            factor1: j,
+            factor2: i,
+            weight: state.weight,
+            missingOperandPosition: missingPosition
+          });
+        }
+      }
+    }
+  }
+} else {
+  // Standard multiplication - original behavior
   for (let i = config.minFactor; i <= config.maxFactor; i++) {
     for (let j = i; j <= config.maxFactor; j++) {
-      const state = await problemSelector.getProblemState(session.user_id, { factor1: i, factor2: j });
+      const state = await problemSelector.getProblemState(session.user_id, { 
+        factor1: i, 
+        factor2: j,
+        problemType: problemType as ProblemType
+      });
       
       // Add weights for both factor orderings for easier display in frontend
       allWeights.push({
@@ -83,6 +143,7 @@ async function generateSessionSummary(sessionId: number) {
       }
     }
   }
+}
 
   // Calculate session statistics
   const totalCorrect = sessionAttempts.filter(a => a.is_correct).length;
@@ -93,11 +154,13 @@ async function generateSessionSummary(sessionId: number) {
     attempts: sessionAttempts.map(attempt => {
       // Get average time for this problem combination (using normalized key)
       const normalizedFactors = [attempt.factor1, attempt.factor2].sort((a, b) => a - b);
-      const avgTimeKey = `${normalizedFactors[0]}x${normalizedFactors[1]}`;
+      const avgTimeKey = `${normalizedFactors[0]}x${normalizedFactors[1]}x${attempt.problem_type}`;
       
       return {
         factor1: attempt.factor1,
         factor2: attempt.factor2,
+        problemType: attempt.problem_type,
+        missingOperandPosition: attempt.missing_operand_position,
         isCorrect: attempt.is_correct,
         responseTime: attempt.response_time_ms,
         averageTime: avgTimeMap.get(avgTimeKey) || null,
@@ -107,7 +170,7 @@ async function generateSessionSummary(sessionId: number) {
     problemWeights: allWeights,
     sessionStats: {
       totalProblems: session.total_problems,
-      correctAnswers: totalCorrect,
+      correctProblems: totalCorrect,
       accuracy: accuracy,
       averageResponseTime: avgTime,
       completedAt: session.end_time
@@ -118,10 +181,17 @@ async function generateSessionSummary(sessionId: number) {
 export class SessionsController {
   static create: RequestHandler = async (req, res) => {
     try {
-      const { userId, totalProblems } = req.body;
+      // Updated to accept problemType parameter
+      const { userId, totalProblems, problemType } = req.body;
 
       if (!userId || !totalProblems) {
         res.status(400).json({ error: 'userId and totalProblems are required' });
+        return;
+      }
+
+      // Validate problemType if provided
+      if (problemType && !['multiplication', 'missing_factor'].includes(problemType)) {
+        res.status(400).json({ error: 'Invalid problemType. Must be "multiplication" or "missing_factor"' });
         return;
       }
 
@@ -134,12 +204,18 @@ export class SessionsController {
       }
 
       const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+      // Create the session using properties that match the entity definition
       const session = sessionRepository.create({
         user_id: userId,
         total_problems: totalProblems,
         completed_problems: 0,
         is_completed: false
       });
+      
+      // Assign problem_type using type assertion
+      if (problemType) {
+        (session as { problem_type?: string }).problem_type = problemType;
+      }
 
       await sessionRepository.save(session);
       res.status(201).json(session);
@@ -149,78 +225,155 @@ export class SessionsController {
     }
   };
 
-  static getNextProblem: RequestHandler = async (req, res) => {
-    try {
-      const { sessionId } = req.params;
-      const sessionRepository = AppDataSource.getRepository(ExerciseSession);
-      const session = await sessionRepository.findOne({ 
-        where: { id: parseInt(sessionId) },
-        relations: ['attempts', 'user']
-      });
 
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
+static getNextProblem: RequestHandler = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const sessionRepository = AppDataSource.getRepository(ExerciseSession);
+    const session = await sessionRepository.findOne({ 
+      where: { id: parseInt(sessionId) },
+      relations: ['attempts', 'user']
+    });
 
-      if (session.is_completed || session.completed_problems >= session.total_problems) {
-        res.status(400).json({ error: 'Session is completed' });
-        return;
-      }
-
-      console.log(`\n[getNextProblem] Selecting problem for user ${session.user_id}, session ${sessionId}`);
-      console.log(`[getNextProblem] Progress: ${session.completed_problems}/${session.total_problems} problems`);
-
-      // Get user's problem history - include more history for better pattern detection
-      const problemRepository = AppDataSource.getRepository(ProblemAttempt);
-      const userAttempts = await problemRepository
-        .createQueryBuilder('attempt')
-        .innerJoin('attempt.session', 'session')
-        .where('session.user_id = :userId', { userId: session.user_id })
-        .orderBy('attempt.created_at', 'DESC')
-        .limit(50) // Get more history for better analysis
-        .getMany();
-
-      // Convert attempts to ProblemHistory format
-      const history: ProblemHistory[] = userAttempts.map(attempt => ({
-        factor1: attempt.factor1,
-        factor2: attempt.factor2,
-        correct: attempt.is_correct || false,
-        timeToAnswer: attempt.response_time_ms || 0,
-        timestamp: attempt.created_at.getTime()
-      }));
-
-      console.log(`[getNextProblem] Analyzed ${history.length} recent attempts`);
-
-      // Use default configuration for problem selection
-      const config = { ...DEFAULT_CONFIG };
-      console.log(`[getNextProblem] Using default factor range: ${config.minFactor}-${config.maxFactor}`);
-      
-      // Select next problem using enhanced weight-based selection
-      const nextProblem = await problemSelector.selectNextProblem(session.user_id, history, config);
-      
-      console.log(`[getNextProblem] Selected problem: ${nextProblem.factor1} × ${nextProblem.factor2}`);
-
-      // Create and save the problem
-      const problem = problemRepository.create({
-        session_id: session.id,
-        factor1: nextProblem.factor1,
-        factor2: nextProblem.factor2,
-        attempt_number: 1
-      });
-
-      await problemRepository.save(problem);
-
-      res.json({
-        problemId: problem.id,
-        factor1: problem.factor1,
-        factor2: problem.factor2
-      });
-    } catch (error) {
-      console.error('Error getting next problem:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
     }
-  };
+
+    if (session.is_completed || session.completed_problems >= session.total_problems) {
+      res.status(400).json({ error: 'Session is completed' });
+      return;
+    }
+
+    console.log(`\n[getNextProblem] Selecting problem for user ${session.user_id}, session ${sessionId}`);
+    console.log(`[getNextProblem] Progress: ${session.completed_problems}/${session.total_problems} problems`);
+    const problemType = (session as { problem_type?: string }).problem_type || 'multiplication';
+    console.log(`[getNextProblem] Problem type: ${problemType}`);
+
+    // Get user's problem history
+    const problemRepository = AppDataSource.getRepository(ProblemAttempt);
+    const userAttempts = await problemRepository
+      .createQueryBuilder('attempt')
+      .innerJoin('attempt.session', 'session')
+      .where('session.user_id = :userId', { userId: session.user_id })
+      .orderBy('attempt.created_at', 'DESC')
+      .limit(50)
+      .getMany();
+
+    const history = userAttempts.map(attempt => ({
+      factor1: attempt.factor1,
+      factor2: attempt.factor2,
+      correct: attempt.is_correct || false,
+      timeToAnswer: attempt.response_time_ms || 0,
+      timestamp: attempt.created_at.getTime(),
+      problemType: attempt.problem_type as ProblemType || 'multiplication',
+      missingOperandPosition: attempt.missing_operand_position as 'first' | 'second' | undefined
+    }));
+
+    console.log(`[getNextProblem] Analyzed ${history.length} recent attempts`);
+
+    const config = problemType === 'missing_factor' 
+      ? { ...MISSING_FACTOR_CONFIG, problemType: problemType as ProblemType }
+      : { ...DEFAULT_CONFIG, problemType: problemType as ProblemType };
+    
+    console.log(`[getNextProblem] Using factor range: ${config.minFactor}-${config.maxFactor}`);
+    
+    // Get next problem using enhanced weight-based selection
+    const nextProblem = await problemSelector.selectNextProblem(session.user_id, history, config);
+    console.log(`[getNextProblem] Selected problem:`, nextProblem);
+
+    // Create and save the problem
+    const problem = new ProblemAttempt();
+    problem.session_id = session.id;
+    problem.problem_type = nextProblem.problemType || 'multiplication';
+
+    if (problem.problem_type === 'missing_factor') {
+      if (nextProblem.missingOperandPosition === 'first') {
+        // For problems like "? × 6 = 42"
+        const visibleFactor = nextProblem.factor2 !== null ? nextProblem.factor2 : config.minFactor;
+        
+        // Now we can access the originalFactors property to get the hidden operand
+        const originalFactors = (nextProblem as Problem).originalFactors;
+        let hiddenFactor = visibleFactor; // Default to same value (original behavior)
+        
+        if (originalFactors && originalFactors.hidden) {
+          // Use the hidden factor from the original problem selection
+          hiddenFactor = originalFactors.hidden;
+        } else {
+          console.log('[getNextProblem] Warning: originalFactors not provided, using fallback');
+          // Fallback: choose a different random factor (better than using the same value)
+          do {
+            hiddenFactor = Math.floor(Math.random() * (config.maxFactor - config.minFactor + 1)) + config.minFactor;
+          } while (hiddenFactor === visibleFactor);
+        }
+        
+        // Set the factors: factor1 is the answer (hidden), factor2 is visible
+        problem.factor1 = hiddenFactor; // This will be the correct answer to find
+        problem.factor2 = visibleFactor; // This is shown to the user
+        problem.missing_operand_position = 'first';
+        
+        console.log(`[getNextProblem] Missing first operand problem: ? × ${problem.factor2} = ${problem.factor1 * problem.factor2}`);
+      } else {
+        // For problems like "6 × ? = 42"
+        const visibleFactor = nextProblem.factor1 !== null ? nextProblem.factor1 : config.minFactor;
+        
+        // Now we can access the originalFactors property to get the hidden operand
+        const originalFactors = (nextProblem as Problem).originalFactors;
+        let hiddenFactor = visibleFactor; // Default to same value (original behavior)
+        
+        if (originalFactors && originalFactors.hidden) {
+          // Use the hidden factor from the original problem selection
+          hiddenFactor = originalFactors.hidden;
+        } else {
+          console.log('[getNextProblem] Warning: originalFactors not provided, using fallback');
+          // Fallback: choose a different random factor (better than using the same value)
+          do {
+            hiddenFactor = Math.floor(Math.random() * (config.maxFactor - config.minFactor + 1)) + config.minFactor;
+          } while (hiddenFactor === visibleFactor);
+        }
+        
+        // Set the factors: factor1 is visible, factor2 is the answer (hidden)
+        problem.factor1 = visibleFactor; // This is shown to the user
+        problem.factor2 = hiddenFactor; // This will be the correct answer to find
+        problem.missing_operand_position = 'second';
+        
+        console.log(`[getNextProblem] Missing second operand problem: ${problem.factor1} × ? = ${problem.factor1 * problem.factor2}`);
+      }
+    } else {
+      // Standard multiplication problem
+      // Make sure we set the factors for multiplication problems
+      problem.factor1 = nextProblem.factor1 !== null ? nextProblem.factor1 : 0;
+      problem.factor2 = nextProblem.factor2 !== null ? nextProblem.factor2 : 0;
+      problem.missing_operand_position = null;
+      
+      console.log(`[getNextProblem] Standard multiplication problem: ${problem.factor1} × ${problem.factor2} = ${problem.factor1 * problem.factor2}`);
+    }
+    
+    problem.attempt_number = 1;
+    await problemRepository.save(problem);
+
+    // Prepare the response - Send null for the missing operand
+    const responseData: ProblemResponse = {
+      problemId: problem.id,
+      factor1: problem.missing_operand_position === 'first' ? null : problem.factor1,
+      factor2: problem.missing_operand_position === 'second' ? null : problem.factor2,
+      problemType: problem.problem_type,
+      missingOperandPosition: problem.missing_operand_position
+    };
+
+    // Add product value for missing factor problems
+    if (problem.problem_type === 'missing_factor') {
+      // Calculate the product using the actual stored factors
+      responseData.product = problem.factor1 * problem.factor2;
+      console.log(`[getNextProblem] Adding product: ${problem.factor1} × ${problem.factor2} = ${responseData.product}`);
+    }
+
+    res.json(responseData);
+  } catch (error) {
+    console.error('Error getting next problem:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
 
   static getSession: RequestHandler = async (req, res) => {
     try {
@@ -274,12 +427,55 @@ export class SessionsController {
         return;
       }
 
-      console.log(`\n[submitAttempt] Processing attempt for problem ${problem.factor1} × ${problem.factor2}`);
+      let problemDesc = '';
+      const isProblemMissingFactor = problem.problem_type === 'missing_factor';
+      
+      if (isProblemMissingFactor) {
+        problemDesc = problem.missing_operand_position === 'first' ? 
+          `? × ${problem.factor2}` : 
+          `${problem.factor1} × ?`;
+      } else {
+        problemDesc = `${problem.factor1} × ${problem.factor2}`;
+      }
+      
+      console.log(`\n[submitAttempt] Processing attempt for problem ${problemDesc}`);
       console.log(`[submitAttempt] User answer: ${answer}, Response time: ${responseTimeMs}ms`);
 
-      // Update problem attempt
-      const correctAnswer = problem.factor1 * problem.factor2;
-      const isCorrect = correctAnswer === answer;
+      // Calculate correct answer based on problem type
+      let correctAnswer: number;
+      let isCorrect: boolean;
+
+      if (isProblemMissingFactor) {
+        // For missing factor problems
+        // Calculate the product using the stored factors
+        const product = problem.factor1 * problem.factor2;
+        
+        if (problem.missing_operand_position === 'first') {
+          // First operand is missing (? × factor2 = product)
+          correctAnswer = problem.factor1; // The stored value represents the expected answer
+          isCorrect = answer === correctAnswer;
+          
+          // Additional validation: Check if the user's answer multiplied by factor2 equals the product
+          if (!isCorrect && problem.factor2 !== 0 && (answer * problem.factor2) === product) {
+            console.log(`[submitAttempt] Alternative product check passed: ${answer} × ${problem.factor2} = ${product}`);
+            isCorrect = true;
+          }
+        } else {
+          // Second operand is missing (factor1 × ? = product)
+          correctAnswer = problem.factor2; // The stored value represents the expected answer
+          isCorrect = answer === correctAnswer;
+          
+          // Additional validation: Check if factor1 multiplied by the user's answer equals the product
+          if (!isCorrect && problem.factor1 !== 0 && (problem.factor1 * answer) === product) {
+            console.log(`[submitAttempt] Alternative product check passed: ${problem.factor1} × ${answer} = ${product}`);
+            isCorrect = true;
+          }
+        }
+      } else {
+        // Standard multiplication problem
+        correctAnswer = problem.factor1 * problem.factor2;
+        isCorrect = correctAnswer === answer;
+      }
       problem.user_answer = answer;
       problem.is_correct = isCorrect;
       problem.response_time_ms = responseTimeMs;
@@ -292,7 +488,9 @@ export class SessionsController {
         where: {
           user_id: session.user_id,
           factor1: Math.min(problem.factor1, problem.factor2),
-          factor2: Math.max(problem.factor1, problem.factor2)
+          factor2: Math.max(problem.factor1, problem.factor2),
+          problem_type: problem.problem_type,
+          missing_operand_position: problem.missing_operand_position as string | undefined
         }
       });
 
@@ -301,6 +499,8 @@ export class SessionsController {
           user_id: session.user_id,
           factor1: Math.min(problem.factor1, problem.factor2),
           factor2: Math.max(problem.factor1, problem.factor2),
+          problem_type: problem.problem_type,
+          missing_operand_position: problem.missing_operand_position,
           total_attempts: 0,
           correct_attempts: 0,
           avg_response_time_ms: 0
@@ -312,18 +512,23 @@ export class SessionsController {
       if (isCorrect) {
         statistic.correct_attempts += 1;
       }
-      
+
       // Update average response time using weighted average
       statistic.avg_response_time_ms = 
         (statistic.avg_response_time_ms * (statistic.total_attempts - 1) + responseTimeMs) / 
         statistic.total_attempts;
-      
+
       await statisticsRepository.save(statistic);
 
       // Update problem weights based on performance
       await problemSelector.updateProblemAfterAttempt(
         session.user_id,
-        { factor1: problem.factor1, factor2: problem.factor2 },
+        { 
+          factor1: problem.factor1, 
+          factor2: problem.factor2,
+          problemType: problem.problem_type as ProblemType,
+          missingOperandPosition: problem.missing_operand_position as 'first' | 'second' | undefined
+        },
         isCorrect,
         responseTimeMs
       );
@@ -336,16 +541,22 @@ export class SessionsController {
       }
       await sessionRepository.save(session);
 
-
       // Get previous attempts for this specific problem combination
       const previousAttempts = await problemRepository
       .createQueryBuilder('attempt')
       .innerJoin('attempt.session', 'session')
       .where('session.user_id = :userId', { userId: session.user_id })
       .andWhere(
-        '(attempt.factor1 = :factor1 AND attempt.factor2 = :factor2) OR ' +
-        '(attempt.factor1 = :factor2 AND attempt.factor2 = :factor1)',
-        { factor1: problem.factor1, factor2: problem.factor2 }
+        // Match based on problem type - for missing factor, also match the position
+        isProblemMissingFactor ?
+          '(attempt.factor1 = :factor1 AND attempt.factor2 = :factor2 AND attempt.problem_type = :problemType AND attempt.missing_operand_position = :missingPosition)' :
+          '((attempt.factor1 = :factor1 AND attempt.factor2 = :factor2) OR (attempt.factor1 = :factor2 AND attempt.factor2 = :factor1)) AND attempt.problem_type = :problemType',
+        { 
+          factor1: problem.factor1, 
+          factor2: problem.factor2,
+          problemType: problem.problem_type,
+          missingPosition: problem.missing_operand_position 
+        }
       )
       .andWhere('attempt.id != :currentAttemptId', { currentAttemptId: problem.id })
       .orderBy('attempt.created_at', 'DESC')
@@ -449,6 +660,8 @@ export class SessionsController {
       const formattedAttempts = attempts.map(attempt => ({
         factor1: attempt.factor1,
         factor2: attempt.factor2,
+        problemType: attempt.problem_type,
+        missingOperandPosition: attempt.missing_operand_position,
         isCorrect: attempt.is_correct || false,
         responseTime: attempt.response_time_ms || 0,
         averageTime: null, // Will be filled in getSessionSummary

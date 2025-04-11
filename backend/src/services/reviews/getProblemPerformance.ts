@@ -1,24 +1,19 @@
 import { AppDataSource } from '../../config/database';
-
-interface ProblemPerformance {
-  factor1: number;
-  factor2: number;
-  accuracy: number;
-  averageResponseTime: number;
-  attempts: number;
-}
+import { ProblemPerformance } from '../../types/sessionReview.types';
 
 /**
  * Gets the most challenging problems for a user
  * Challenging problems are those with the lowest accuracy rates
  * 
  * @param userId The ID of the user
+ * @param problemType The type of problem to filter for ('multiplication', 'missing_factor', etc.)
  * @param limit Number of problems to return (default: 3)
  * @param minAttempts Minimum number of attempts required (default: 5)
  * @returns Array of problem performance objects
  */
 export async function getMostChallengingProblems(
   userId: number, 
+  problemType: string,
   limit: number = 3,
   minAttempts: number = 5
 ): Promise<ProblemPerformance[]> {
@@ -35,6 +30,7 @@ export async function getMostChallengingProblems(
       ])
       .from('problem_statistics', 'stat')
       .where('stat.user_id = :userId', { userId })
+      .andWhere('stat.problem_type = :problemType', { problemType })
       .andWhere('stat.total_attempts >= :minAttempts', { minAttempts })
       .orderBy('(stat.correct_attempts * 100.0 / stat.total_attempts)', 'ASC') // Order by accuracy ascending
       .limit(limit)
@@ -61,12 +57,14 @@ export async function getMostChallengingProblems(
  * Slowest problems are those with the longest average response times
  * 
  * @param userId The ID of the user
+ * @param problemType The type of problem to filter for ('multiplication', 'missing_factor', etc.)
  * @param limit Number of problems to return (default: 3)
  * @param minAttempts Minimum number of attempts required (default: 5)
  * @returns Array of problem performance objects
  */
 export async function getSlowestProblems(
   userId: number, 
+  problemType: string,
   limit: number = 3,
   minAttempts: number = 5
 ): Promise<ProblemPerformance[]> {
@@ -83,6 +81,7 @@ export async function getSlowestProblems(
       ])
       .from('problem_statistics', 'stat')
       .where('stat.user_id = :userId', { userId })
+      .andWhere('stat.problem_type = :problemType', { problemType })
       .andWhere('stat.total_attempts >= :minAttempts', { minAttempts })
       .orderBy('stat.avg_response_time_ms', 'DESC') // Order by response time descending
       .limit(limit)

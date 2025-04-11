@@ -2,23 +2,30 @@ import { AppDataSource } from "../../config/database";
 
 
 /**
- * Gets overall statistics for a user's multiplication practice history
+ * Gets overall statistics for a user's practice history filtered by problem type
  * 
  * @param userId The ID of the user to get statistics for
+ * @param problemType The type of problem to filter statistics for ('multiplication', 'missing_factor', etc.)
  * @returns Object with totalSessions, totalProblems, overallAccuracy, and averageResponseTime
  */
-export async function getUserOverallStatistics(userId: number) {
+export async function getUserOverallStatistics(userId: number, problemType: string) {
   try {
     // Validate userId is a number
     if (isNaN(userId)) {
       throw new Error('Invalid userId provided');
     }
 
-    // Create query to get session count
+    // Validate problemType is provided
+    if (!problemType) {
+      throw new Error('Problem type must be provided');
+    }
+
+    // Create query to get session count filtered by problem type
     const sessionsQuery = await AppDataSource
       .getRepository('exercise_sessions')
       .createQueryBuilder('session')
       .where('session.user_id = :userId', { userId })
+      .andWhere('session.problem_type = :problemType', { problemType })
       .getCount();
 
     // Create query to calculate problem statistics in a single query for efficiency
@@ -30,6 +37,8 @@ export async function getUserOverallStatistics(userId: number) {
       .from('problem_attempts', 'attempt')
       .innerJoin('exercise_sessions', 'session', 'attempt.session_id = session.id')
       .where('session.user_id = :userId', { userId })
+      .andWhere('session.problem_type = :problemType', { problemType })
+      .andWhere('attempt.problem_type = :problemType', { problemType })
       .andWhere('attempt.is_correct IS NOT NULL') // Only count answered problems
       .getRawOne();
 

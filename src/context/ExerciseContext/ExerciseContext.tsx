@@ -112,7 +112,7 @@ if (process.env.NODE_ENV === 'development') {
 export const ExerciseProvider: React.FC<ExerciseProviderProps> = ({
   numberOfProblems,
   minFactor = 2,
-  maxFactor = 10,
+  maxFactor = 12,
   children
 }) => {
   const [state, dispatch] = useReducer(

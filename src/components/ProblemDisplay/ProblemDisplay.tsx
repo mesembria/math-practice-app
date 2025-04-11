@@ -1,22 +1,30 @@
 import React from 'react';
+import { ProblemType } from '../../services/api';
 
 interface ProblemDisplayProps {
-  factor1: number;
-  factor2: number;
+  factor1: number | null;
+  factor2: number | null;
   answer: string;
   className?: string;
+  problemType?: ProblemType;
+  missingOperandPosition?: 'first' | 'second';
+  product?: number;
 }
 
 const ProblemDisplay: React.FC<ProblemDisplayProps> = ({ 
   factor1, 
   factor2,
   answer,
-  className = '' 
+  className = '',
+  problemType = ProblemType.MULTIPLICATION,
+  missingOperandPosition,
+  product
 }) => {
-  // Validate prop ranges
-  if (factor1 < 2 || factor1 > 10 || factor2 < 2 || factor2 > 10) {
-    throw new Error('Factors must be between 2 and 10');
-  }
+  // Calculate the product if not provided (for backward compatibility)
+  // But only if both factors are not null
+  const actualProduct = problemType === ProblemType.MISSING_FACTOR
+  ? product
+  : (factor1 !== null && factor2 !== null) ? factor1 * factor2 : null;
 
   return (
     <div 
@@ -27,7 +35,8 @@ const ProblemDisplay: React.FC<ProblemDisplayProps> = ({
         ${className}
       `}
       role="region"
-      aria-label="multiplication problem"
+      aria-label={problemType === ProblemType.MULTIPLICATION ? 
+        "multiplication problem" : "missing factor problem"}
     >
       <p 
         className={`
@@ -35,13 +44,40 @@ const ProblemDisplay: React.FC<ProblemDisplayProps> = ({
           ${className.includes('text-') ? '' : 'text-5xl md:text-6xl'}
         `}
       >
-        <span className="inline-block min-w-[1.5ch] text-center">{factor1}</span>
-        <span className="mx-4 text-gray-600"> × </span>
-        <span className="inline-block min-w-[1.5ch] text-center">{factor2}</span>
-        <span className="mx-4">=</span>
-        <span className="inline-block min-w-[3ch] text-center text-blue-600">
-          {answer !== '0' ? answer : ''}
-        </span>
+        {problemType === ProblemType.MULTIPLICATION ? (
+          // Standard multiplication display
+          <>
+            <span className="inline-block min-w-[1.5ch] text-center">{factor1}</span>
+            <span className="mx-4 text-gray-600"> × </span>
+            <span className="inline-block min-w-[1.5ch] text-center">{factor2}</span>
+            <span className="mx-4">=</span>
+            <span className="inline-block min-w-[3ch] text-center text-blue-600">
+              {answer !== '0' ? answer : ''}
+            </span>
+          </>
+        ) : problemType === ProblemType.MISSING_FACTOR && missingOperandPosition === 'first' ? (
+          // Missing first operand display
+          <>
+            <span className="inline-block min-w-[1.5ch] text-center text-blue-600">
+              {answer !== '0' ? answer : '?'}
+            </span>
+            <span className="mx-4 text-gray-600"> × </span>
+            <span className="inline-block min-w-[1.5ch] text-center">{factor2}</span>
+            <span className="mx-4">=</span>
+            <span className="inline-block min-w-[3ch] text-center">{actualProduct}</span>
+          </>
+        ) : (
+          // Missing second operand display
+          <>
+            <span className="inline-block min-w-[1.5ch] text-center">{factor1}</span>
+            <span className="mx-4 text-gray-600"> × </span>
+            <span className="inline-block min-w-[1.5ch] text-center text-blue-600">
+              {answer !== '0' ? answer : '?'}
+            </span>
+            <span className="mx-4">=</span>
+            <span className="inline-block min-w-[3ch] text-center">{actualProduct}</span>
+          </>
+        )}
       </p>
     </div>
   );

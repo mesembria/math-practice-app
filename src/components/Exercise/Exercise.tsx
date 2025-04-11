@@ -1,7 +1,7 @@
-// src/components/Exercise/Exercise.tsx - Updated with Encouragement Messages
+// src/components/Exercise/Exercise.tsx - Updated with problem type support
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api, SessionSummary as SessionSummaryType } from '../../services/api';
+import { api, SessionSummary as SessionSummaryType, ProblemType } from '../../services/api';
 import ExerciseView from './ExerciseView';
 import CompletionMessage from './CompletionMessage';
 import SessionSummary from '../SessionSummary/SessionSummary';
@@ -30,6 +30,7 @@ const Exercise: React.FC = () => {
   const [showCompletionMessage, setShowCompletionMessage] = useState(false);
   const [correctCount, setCorrectCount] = useState(0);
   const [isProcessingAnswer, setIsProcessingAnswer] = useState(false);
+  const [problemType, setProblemType] = useState<ProblemType>(ProblemType.MULTIPLICATION);
 
   const { 
     setStartTime, 
@@ -48,116 +49,159 @@ const Exercise: React.FC = () => {
   } = useEncouragementMessages();
 
   // Fetch session and first problem on mount
-  useEffect(() => {
-    const fetchSessionAndProblem = async () => {
-      try {
-        if (!sessionId) {
-          throw new Error('No session ID provided');
-        }
-        
-        const parsedSessionId = parseInt(sessionId);
-        
-        // First get the session details
-        const session = await api.getSession(parsedSessionId);
-        setTotalProblems(session.total_problems);
-        
-        // Check if session is already completed
-        if (session.is_completed) {
-          // If completed, fetch the session results instead of the next problem
-          try {
-            // Get all attempts for this session to calculate correct count
-            const attempts = await api.getSessionAttempts(parsedSessionId);
-            const correctOnes = attempts.filter(a => a.isCorrect).length;
-            setCorrectCount(correctOnes);
-            
-            // Get the full session summary
-            const summary = await api.getSessionSummary(parsedSessionId);
-            setSessionSummary(summary);
-            setIsComplete(true);
-            setIsLoading(false);
-          } catch (summaryErr) {
-            console.error('Error fetching completed session summary:', summaryErr);
-            setError('Unable to load the session results. Please return to home and try again.');
-            setIsLoading(false);
-          }
-          return;
-        }
-        
-        // For active sessions, get the next problem
+  // Update the useEffect hook in Exercise.tsx that fetches the session and problem
+
+useEffect(() => {
+  const fetchSessionAndProblem = async () => {
+    try {
+      if (!sessionId) {
+        throw new Error('No session ID provided');
+      }
+      
+      const parsedSessionId = parseInt(sessionId);
+      
+      // First get the session details
+      const session = await api.getSession(parsedSessionId);
+      setTotalProblems(session.total_problems);
+      setProblemType(session.problem_type);
+      
+      // Check if session is already completed
+      if (session.is_completed) {
+        // If completed, fetch the session results instead of the next problem
         try {
-          const problem = await api.getNextProblem(parsedSessionId);
-          setCurrentProblem(problem);
-          setResults(new Array(session.total_problems).fill(null));
-          setStartTime(Date.now());
+          // Get all attempts for this session to calculate correct count
+          const attempts = await api.getSessionAttempts(parsedSessionId);
+          const correctOnes = attempts.filter(a => a.isCorrect).length;
+          setCorrectCount(correctOnes);
+          
+          // Get the full session summary
+          const summary = await api.getSessionSummary(parsedSessionId);
+          setSessionSummary(summary);
+          setIsComplete(true);
           setIsLoading(false);
-        } catch (problemErr) {
-          console.error('Error fetching problem:', problemErr);
-          setError('Failed to load exercise problems. Please try again.');
+        } catch (summaryErr) {
+          console.error('Error fetching completed session summary:', summaryErr);
+          setError('Unable to load the session results. Please return to home and try again.');
           setIsLoading(false);
         }
-      } catch (err) {
-        console.error('Error fetching session:', err);
-        setError('Failed to load exercise session. Please try again.');
+        return;
+      }
+      
+      // For active sessions, get the next problem
+      try {
+        const problem = await api.getNextProblem(parsedSessionId);
+        
+        // Handle the type mismatch between api.Problem and Exercise.Problem
+        setCurrentProblem({
+          problemId: problem.problemId,
+          factor1: problem.factor1,
+          factor2: problem.factor2,
+          missingOperandPosition: problem.missingOperandPosition,
+          product: problem.product // Include the product field
+        });
+        
+        setResults(new Array(session.total_problems).fill(null));
+        setStartTime(Date.now());
+        setIsLoading(false);
+      } catch (problemErr) {
+        console.error('Error fetching problem:', problemErr);
+        setError('Failed to load exercise problems. Please try again.');
         setIsLoading(false);
       }
-    };
+    } catch (err) {
+      console.error('Error fetching session:', err);
+      setError('Failed to load exercise session. Please try again.');
+      setIsLoading(false);
+    }
+  };
 
-    fetchSessionAndProblem();
-  }, [sessionId, setStartTime]);
-
-// Handle answer submission
-const handleNext = async () => {
-  if (!currentProblem || !sessionId || isPaused || isProcessingAnswer) return;
-
-  // Start the processing state - will disable input during encouragement display
-  setIsProcessingAnswer(true);
-  const responseTimeMs = calculateResponseTime();
+  fetchSessionAndProblem();
+}, [sessionId, setStartTime]);
+  const handleNext = async () => {
+    if (!currentProblem || !sessionId || isPaused || isProcessingAnswer) return;
   
-  try {
-    const result = await api.submitAttempt(
-      parseInt(sessionId),
-      currentProblem.problemId,
-      parseInt(currentAnswer),
-      responseTimeMs
-    );
-
-    // Update results at current index
-    const newResults = [...results];
-    const currentIndex = newResults.findIndex(r => r === null);
-    if (currentIndex !== -1) {
-      newResults[currentIndex] = result.isCorrect;
-      setResults(newResults);
-    }
-
-    // Update correct count
-    if (result.isCorrect) {
-      setCorrectCount(prev => prev + 1);
-    }
-
-    // Handle session completion
-    if (result.isSessionComplete && result.sessionSummary) {
-      // Show completion message briefly before showing full summary
-      setShowCompletionMessage(true);
-      setIsComplete(true);
-      setSessionSummary(result.sessionSummary);
+    // Start the processing state - will disable input during encouragement display
+    setIsProcessingAnswer(true);
+    const responseTimeMs = calculateResponseTime();
+    
+    try {
+      // Convert the user's answer to a number
+      const answerNum = parseInt(currentAnswer);
       
-      // After 2 seconds, hide the completion message to show the full summary
-      setTimeout(() => {
-        setShowCompletionMessage(false);
-      }, 2000);
-      return; // Exit early for completed sessions
-    }
-
-    // Process encouragement data if available
-    const shouldShowEncouragement = result.encouragementData && result.isCorrect;
-    if (shouldShowEncouragement && result.encouragementData) {
-      processEncouragementData(result.encouragementData);
-      
-      // For encouragement messages, set a shorter delay (700ms instead of 1000ms)
-      setTimeout(async () => {
+      const result = await api.submitAttempt(
+        parseInt(sessionId),
+        currentProblem.problemId,
+        answerNum,
+        responseTimeMs
+      );
+  
+      // Update results at current index
+      const newResults = [...results];
+      const currentIndex = newResults.findIndex(r => r === null);
+      if (currentIndex !== -1) {
+        newResults[currentIndex] = result.isCorrect;
+        setResults(newResults);
+      }
+  
+      // Update correct count
+      if (result.isCorrect) {
+        setCorrectCount(prev => prev + 1);
+      }
+  
+      // Handle session completion
+      if (result.isSessionComplete && result.sessionSummary) {
+        // Show completion message briefly before showing full summary
+        setShowCompletionMessage(true);
+        setIsComplete(true);
+        setSessionSummary(result.sessionSummary);
+        
+        // After 2 seconds, hide the completion message to show the full summary
+        setTimeout(() => {
+          setShowCompletionMessage(false);
+        }, 2000);
+        return; // Exit early for completed sessions
+      }
+  
+      // Process encouragement data if available
+      const shouldShowEncouragement = result.encouragementData && result.isCorrect;
+      if (shouldShowEncouragement && result.encouragementData) {
+        processEncouragementData(result.encouragementData);
+        
+        // For encouragement messages, set a shorter delay (700ms instead of 1000ms)
+        setTimeout(async () => {
+          try {
+            const nextProblem = await api.getNextProblem(parseInt(sessionId));
+            
+            // Here we need to explicitly handle the type compatibility
+            setCurrentProblem({
+              problemId: nextProblem.problemId,
+              factor1: nextProblem.factor1,
+              factor2: nextProblem.factor2,
+              missingOperandPosition: nextProblem.missingOperandPosition,
+              product: nextProblem.product // Include the product field
+            });
+            setCurrentAnswer('0');
+            resetTimer();
+            setIsProcessingAnswer(false);
+          } catch (err) {
+            console.error('Error fetching next problem:', err);
+            setError('Failed to load the next problem. Please try again.');
+            setIsProcessingAnswer(false);
+          }
+        }, 700); // Reduced from 1000ms to 700ms for a more responsive feel
+      } else {
+        // If no encouragement message, fetch next problem immediately with no delay
         try {
           const nextProblem = await api.getNextProblem(parseInt(sessionId));
-          setCurrentProblem(nextProblem);
+          
+          // Here we need to explicitly handle the type compatibility
+          setCurrentProblem({
+            problemId: nextProblem.problemId,
+            factor1: nextProblem.factor1,
+            factor2: nextProblem.factor2,
+            missingOperandPosition: nextProblem.missingOperandPosition,
+            product: nextProblem.product // Include the product field
+          });
           setCurrentAnswer('0');
           resetTimer();
           setIsProcessingAnswer(false);
@@ -166,27 +210,13 @@ const handleNext = async () => {
           setError('Failed to load the next problem. Please try again.');
           setIsProcessingAnswer(false);
         }
-      }, 700); // Reduced from 1000ms to 700ms for a more responsive feel
-    } else {
-      // If no encouragement message, fetch next problem immediately with no delay
-      try {
-        const nextProblem = await api.getNextProblem(parseInt(sessionId));
-        setCurrentProblem(nextProblem);
-        setCurrentAnswer('0');
-        resetTimer();
-        setIsProcessingAnswer(false);
-      } catch (err) {
-        console.error('Error fetching next problem:', err);
-        setError('Failed to load the next problem. Please try again.');
-        setIsProcessingAnswer(false);
       }
+    } catch (err) {
+      console.error('Error submitting attempt:', err);
+      setError('Failed to submit answer. Please try again.');
+      setIsProcessingAnswer(false);
     }
-  } catch (err) {
-    console.error('Error submitting attempt:', err);
-    setError('Failed to submit answer. Please try again.');
-    setIsProcessingAnswer(false);
-  }
-};
+  };
 
   // Handle encouragement message complete
   const handleMessageComplete = () => {
@@ -262,6 +292,7 @@ const handleNext = async () => {
         togglePause={togglePause}
         handleNext={handleNext}
         isInteractionDisabled={isProcessingAnswer}
+        problemType={problemType}
       />
       
       {/* Encouragement message */}
