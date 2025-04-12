@@ -1,4 +1,3 @@
-// src/services/reviews/getUserSessions.ts
 import { AppDataSource } from '../../config/database';
 import { SessionSummary, MissedProblem, PaginationInfo } from '../../types/sessionReview.types';
 
@@ -13,12 +12,14 @@ interface SessionsResponse {
  * @param userId The ID of the user
  * @param page Page number (1-based)
  * @param limit Number of sessions per page
+ * @param problemType Optional filter for problem type ('multiplication', 'missing_factor', etc.)
  * @returns Object with session list and pagination info
  */
 export async function getUserSessions(
   userId: number,
   page: number = 1,
-  limit: number = 10
+  limit: number = 10,
+  problemType?: string
 ): Promise<SessionsResponse> {
   try {
     // Validate parameters
@@ -34,11 +35,17 @@ export async function getUserSessions(
     const offset = (page - 1) * limit;
     
     // Get total count of sessions for pagination
-    const totalSessions = await AppDataSource
+    const totalSessionsQuery = AppDataSource
       .getRepository('exercise_sessions')
       .createQueryBuilder('session')
-      .where('session.user_id = :userId', { userId })
-      .getCount();
+      .where('session.user_id = :userId', { userId });
+    
+    // Add problem type filter if provided
+    if (problemType) {
+      totalSessionsQuery.andWhere('session.problem_type = :problemType', { problemType });
+    }
+    
+    const totalSessions = await totalSessionsQuery.getCount();
     
     // Calculate pagination info
     const totalPages = Math.ceil(totalSessions / limit) || 1; // Ensure at least 1 page
@@ -56,7 +63,7 @@ export async function getUserSessions(
     }
     
     // Get sessions with pagination
-    const sessions = await AppDataSource
+    const sessionsQuery = AppDataSource
       .getRepository('exercise_sessions')
       .createQueryBuilder('session')
       .select([
@@ -67,7 +74,15 @@ export async function getUserSessions(
         'session.completed_problems',
         'session.is_completed'
       ])
-      .where('session.user_id = :userId', { userId })
+      .where('session.user_id = :userId', { userId });
+    
+    // Add problem type filter if provided
+    if (problemType) {
+      sessionsQuery.andWhere('session.problem_type = :problemType', { problemType });
+    }
+    
+    // Add sorting and pagination
+    const sessions = await sessionsQuery
       .orderBy('session.end_time', 'DESC') // Newest first
       .addOrderBy('session.start_time', 'DESC') // Fallback sort if end_time is null
       .addOrderBy('session.id', 'DESC') // Ensure consistent ordering
@@ -94,31 +109,35 @@ export async function getUserSessions(
     const [sessionPerformance, missedProblemsQuery] = await Promise.all([
       // Get session performance data
       AppDataSource
-        .createQueryBuilder()
-        .select('attempt.session_id', 'sessionId')
-        .addSelect('COUNT(*)', 'totalProblems')
-        .addSelect('SUM(CASE WHEN attempt.is_correct = 1 THEN 1 ELSE 0 END)', 'correctProblems')
-        .addSelect('AVG(attempt.response_time_ms)', 'avgResponseTime')
-        .from('problem_attempts', 'attempt')
-        .where('attempt.session_id IN (:...sessionIds)', { sessionIds })
-        .andWhere('attempt.is_correct IS NOT NULL') // Only include answered problems
-        .groupBy('attempt.session_id')
-        .getRawMany(),
+      .createQueryBuilder()
+      .select('attempt.session_id', 'sessionId')
+      .addSelect('COUNT(*)', 'totalProblems')
+      .addSelect('SUM(CASE WHEN attempt.is_correct = 1 THEN 1 ELSE 0 END)', 'correctProblems')
+      .addSelect('AVG(attempt.response_time_ms)', 'avgResponseTime')
+      .from('problem_attempts', 'attempt')
+      .innerJoin('exercise_sessions', 'session', 'attempt.session_id = session.id')
+      .where('attempt.session_id IN (:...sessionIds)', { sessionIds })
+      .andWhere('attempt.is_correct IS NOT NULL') // Only include answered problems
+      .andWhere(problemType ? 'session.problem_type = :problemType' : '1=1', problemType ? { problemType } : {})
+      .groupBy('attempt.session_id')
+      .getRawMany(),
       
       // Get missed problems for each session
       AppDataSource
-        .createQueryBuilder()
-        .select([
-          'attempt.session_id as sessionId',
-          'attempt.factor1 AS factor1',
-          'attempt.factor2 AS factor2',
-          'attempt.user_answer as userAnswer',
-          'attempt.response_time_ms as responseTime'
-        ])
-        .from('problem_attempts', 'attempt')
-        .where('attempt.session_id IN (:...sessionIds)', { sessionIds })
-        .andWhere('attempt.is_correct = 0') // Only include incorrect attempts
-        .getRawMany()
+      .createQueryBuilder()
+      .select([
+        'attempt.session_id as sessionId',
+        'attempt.factor1 AS factor1',
+        'attempt.factor2 AS factor2',
+        'attempt.user_answer as userAnswer',
+        'attempt.response_time_ms as responseTime'
+      ])
+      .from('problem_attempts', 'attempt')
+      .innerJoin('exercise_sessions', 'session', 'attempt.session_id = session.id')
+      .where('attempt.session_id IN (:...sessionIds)', { sessionIds })
+      .andWhere('attempt.is_correct = 0') // Only include incorrect attempts
+      .andWhere(problemType ? 'session.problem_type = :problemType' : '1=1', problemType ? { problemType } : {})
+      .getRawMany()
     ]);
     
     // Map to easily lookup performance data
@@ -138,8 +157,8 @@ export async function getUserSessions(
         missedProblemsMap.set(sessionId, []);
       }
       
-      // Calculate correct answer
-      const correctAnswer = problem.factor1 * problem.factor2;
+      // Calculate correct answer based on problem type
+      const correctAnswer: number = problem.factor1 * problem.factor2;
       
       missedProblemsMap.get(sessionId)!.push({
         factor1: Number(problem.factor1),

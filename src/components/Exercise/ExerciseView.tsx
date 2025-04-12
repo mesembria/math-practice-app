@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import ProblemDisplay from '../ProblemDisplay/ProblemDisplay';
 import NumericKeyboard from '../NumericKeyboard/NumericKeyboard';
 import ProgressIndicator from '../ProgressIndicator/ProgressIndicator';
 import PauseOverlay from './PauseOverlay';
 import ProgressStats from './ProgressStats';
 import { Problem } from './types';
+import { ProblemType } from '../../services/api';
 
 interface ExerciseViewProps {
   currentProblem: Problem;
@@ -15,7 +16,8 @@ interface ExerciseViewProps {
   isPaused: boolean;
   togglePause: () => void;
   handleNext: () => void;
-  isInteractionDisabled?: boolean; // New prop to disable interactions
+  isInteractionDisabled?: boolean;
+  problemType: ProblemType;
 }
 
 /**
@@ -30,11 +32,22 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
   isPaused,
   togglePause,
   handleNext,
-  isInteractionDisabled = false // Default to false
+  isInteractionDisabled = false,
+  problemType
 }) => {
   const currentProblemIndex = results.findIndex(r => r === null) === -1 
     ? totalProblems - 1 
     : results.findIndex(r => r === null);
+  
+  // Add debug logging to understand the problem
+  useEffect(() => {
+    console.log('ExerciseView props:', { 
+      currentProblem, 
+      currentAnswer, 
+      problemType, 
+      results 
+    });
+  }, [currentProblem, currentAnswer, problemType, results]);
 
   return (
     <div className="flex flex-col items-center h-screen max-h-screen gap-3 p-4 overflow-hidden">
@@ -80,11 +93,14 @@ const ExerciseView: React.FC<ExerciseViewProps> = ({
           {/* Main content area with flex-grow to take available space */}
           <div className="flex flex-col items-center gap-4 w-full max-w-2xl flex-grow">
             <div className="flex-grow flex items-center justify-center w-full min-h-0">
-              <ProblemDisplay
+            <ProblemDisplay
                 factor1={currentProblem.factor1}
                 factor2={currentProblem.factor2}
                 answer={currentAnswer}
                 className="w-full text-5xl md:text-6xl"
+                problemType={problemType}
+                missingOperandPosition={currentProblem.missingOperandPosition}
+                product={currentProblem.product}  // Pass product from problem directly
               />
             </div>
 

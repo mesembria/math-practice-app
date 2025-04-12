@@ -1,9 +1,31 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../../services/api';
+import { api, ProblemType } from '../../services/api';
 
-// Storage key for localStorage
+// Storage keys for localStorage
 const LAST_SELECTED_USER_KEY = 'math-practice-last-user';
+const LAST_SELECTED_PROBLEM_TYPE_KEY = 'math-practice-last-problem-type';
+const LAST_SELECTED_NUM_PROBLEMS_KEY = 'math-practice-last-num-problems';
+
+// Type-safe localStorage helper functions
+const safelyGetItem = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    console.error(`Error reading from localStorage (${key}):`, error);
+    return null;
+  }
+};
+
+const safelySetItem = (key: string, value: string): boolean => {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    console.error(`Error writing to localStorage (${key}):`, error);
+    return false;
+  }
+};
 
 interface User {
   id: number;
@@ -12,53 +34,136 @@ interface User {
 }
 
 const LandingPage: React.FC = () => {
+  // Flags to prevent double-saving
+  const initialLoadDone = useRef(false);
+  const blockSavingPreferences = useRef(true);
+  
+  // Preset values for number of problems
+  const problemPresets: readonly number[] = [5, 10, 15, 20, 25] as const;
+  
+  // Initialize with default values first
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [numberOfProblems, setNumberOfProblems] = useState<number>(10);
+  const [problemType, setProblemType] = useState<ProblemType>(ProblemType.MULTIPLICATION);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  // Preset values for number of problems
-  const problemPresets = [5, 10, 15, 20, 25];
-
-  // Load users and restore the last selected user
+  // Load ALL preferences at once in a single useEffect
   useEffect(() => {
-    const fetchUsers = async () => {
+    const loadAllPreferences = async (): Promise<void> => {
+      console.log("Loading ALL preferences at once...");
+      setIsLoading(true);
+      
+      // Step 1: Load the user list first
       try {
-        setIsLoading(true);
         const fetchedUsers = await api.getUsers();
         setUsers(fetchedUsers);
         
-        // Try to get the last selected user from localStorage
-        const lastUserId = localStorage.getItem(LAST_SELECTED_USER_KEY);
-        if (lastUserId) {
-          const parsedId = parseInt(lastUserId);
-          // Only set if the user exists in the fetched users
-          if (fetchedUsers.some(user => user.id === parsedId)) {
-            setSelectedUserId(parsedId);
+        // Step 2: Load all saved preferences from localStorage
+        let savedUserId: number | null = null;
+        let savedProblemType: ProblemType = ProblemType.MULTIPLICATION;
+        let savedNumProblems: number = 10;
+        
+        // Load saved problem type
+        const lastProblemTypeStr = safelyGetItem(LAST_SELECTED_PROBLEM_TYPE_KEY);
+        console.log("Loaded problem type:", lastProblemTypeStr);
+        if (lastProblemTypeStr === 'missing_factor') {
+          savedProblemType = ProblemType.MISSING_FACTOR;
+        }
+        
+        // Load saved number of problems
+        const lastNumProblemsStr = safelyGetItem(LAST_SELECTED_NUM_PROBLEMS_KEY);
+        console.log("Loaded problem count:", lastNumProblemsStr);
+        if (lastNumProblemsStr) {
+          const parsedNumProblems = parseInt(lastNumProblemsStr, 10);
+          if (!isNaN(parsedNumProblems) && problemPresets.includes(parsedNumProblems)) {
+            savedNumProblems = parsedNumProblems;
           }
         }
         
-        setIsLoading(false);
+        // Load saved user ID (must be done after users are loaded)
+        const lastUserIdStr = safelyGetItem(LAST_SELECTED_USER_KEY);
+        console.log("Loaded user ID:", lastUserIdStr);
+        if (lastUserIdStr) {
+          const parsedId = parseInt(lastUserIdStr, 10);
+          if (!isNaN(parsedId) && fetchedUsers.some(user => user.id === parsedId)) {
+            savedUserId = parsedId;
+          }
+        }
+        
+        // Step 3: Set all state at once to minimize re-renders
+        console.log("Setting ALL preferences at once:", {
+          userId: savedUserId,
+          problemType: savedProblemType,
+          numProblems: savedNumProblems
+        });
+        
+        // Update all state values at once
+        setProblemType(savedProblemType);
+        setNumberOfProblems(savedNumProblems);
+        if (savedUserId !== null) {
+          setSelectedUserId(savedUserId);
+        }
+        
+        // Mark initial load as complete
+        initialLoadDone.current = true;
+        
+        // After a short delay, allow saving preferences
+        setTimeout(() => {
+          blockSavingPreferences.current = false;
+          console.log("Preferences saving is now enabled");
+        }, 500);
+        
       } catch (err: unknown) {
-        console.error('Error fetching users:', err);
-        setError('Failed to load users. Please try again.');
+        console.error('Error loading preferences:', err);
+        setError('Failed to load preferences. Please try again.');
+      } finally {
         setIsLoading(false);
       }
     };
 
-    fetchUsers();
-  }, []);
+    loadAllPreferences();
+  }, []); // Empty dependency array - run only once on mount
 
-  // Update localStorage when user selection changes
+  // Save user selection to localStorage (after initial load)
   useEffect(() => {
-    if (selectedUserId !== null) {
-      localStorage.setItem(LAST_SELECTED_USER_KEY, selectedUserId.toString());
+    // Skip during initial render and loading phase
+    if (!initialLoadDone.current || blockSavingPreferences.current || selectedUserId === null) {
+      return;
     }
+    
+    console.log("Saving user ID:", selectedUserId);
+    safelySetItem(LAST_SELECTED_USER_KEY, selectedUserId.toString());
   }, [selectedUserId]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Save problem type to localStorage (after initial load)
+  useEffect(() => {
+    // Skip during initial render and loading phase
+    if (!initialLoadDone.current || blockSavingPreferences.current) {
+      return;
+    }
+    
+    const problemTypeString: string = problemType === ProblemType.MULTIPLICATION 
+      ? 'multiplication' 
+      : 'missing_factor';
+    console.log("Saving problem type:", problemTypeString);
+    safelySetItem(LAST_SELECTED_PROBLEM_TYPE_KEY, problemTypeString);
+  }, [problemType]);
+
+  // Save number of problems to localStorage (after initial load)
+  useEffect(() => {
+    // Skip during initial render and loading phase
+    if (!initialLoadDone.current || blockSavingPreferences.current) {
+      return;
+    }
+    
+    console.log("Saving number of problems:", numberOfProblems);
+    safelySetItem(LAST_SELECTED_NUM_PROBLEMS_KEY, numberOfProblems.toString());
+  }, [numberOfProblems]);
+
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     if (!selectedUserId) {
       setError('Please select a user');
@@ -66,7 +171,7 @@ const LandingPage: React.FC = () => {
     }
 
     try {
-      const session = await api.createSession(selectedUserId, numberOfProblems);
+      const session = await api.createSession(selectedUserId, numberOfProblems, problemType);
       navigate(`/exercise/${session.id}`);
     } catch (err: unknown) {
       console.error('Error creating session:', err);
@@ -74,7 +179,7 @@ const LandingPage: React.FC = () => {
     }
   };
 
-  const handleReviewClick = () => {
+  const handleReviewClick = (): void => {
     navigate('/review');
   };
 
@@ -135,6 +240,41 @@ const LandingPage: React.FC = () => {
                   <span className="font-medium">{user.name}</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Problem Type Selection */}
+          <div>
+            <label className="block text-lg font-medium text-gray-700 mb-3">
+              Problem Type
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setProblemType(ProblemType.MULTIPLICATION)}
+                className={`
+                  p-3 rounded-lg text-center transition-all duration-200
+                  ${problemType === ProblemType.MULTIPLICATION
+                    ? 'bg-blue-500 text-white ring-2 ring-blue-300 ring-offset-2'
+                    : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                  }
+                `}
+              >
+                <span className="font-medium">Multiplication</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProblemType(ProblemType.MISSING_FACTOR)}
+                className={`
+                  p-3 rounded-lg text-center transition-all duration-200
+                  ${problemType === ProblemType.MISSING_FACTOR
+                    ? 'bg-blue-500 text-white ring-2 ring-blue-300 ring-offset-2'
+                    : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                  }
+                `}
+              >
+                <span className="font-medium">Missing Factor</span>
+              </button>
             </div>
           </div>
 

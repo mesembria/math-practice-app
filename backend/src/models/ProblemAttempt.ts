@@ -1,8 +1,10 @@
+// src/models/ProblemAttempt.ts
+
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from "typeorm";
-import { IProblemAttempt, IExerciseSession } from "./types";
+import { ExerciseSession } from "./ExerciseSession";
 
 @Entity("problem_attempts")
-export class ProblemAttempt implements IProblemAttempt {
+export class ProblemAttempt {
   @PrimaryGeneratedColumn()
   id: number;
 
@@ -26,11 +28,17 @@ export class ProblemAttempt implements IProblemAttempt {
 
   @Column({ default: 1 })
   attempt_number: number;
+  
+  @Column({ name: "problem_type", type: "varchar", default: "multiplication" })
+  problem_type: string;
+  
+  @Column({ name: "missing_operand_position", type: "varchar", nullable: true })
+  missing_operand_position: string | null;
 
   @CreateDateColumn()
   created_at: Date;
 
-  @ManyToOne("ExerciseSession", "attempts")
+  @ManyToOne(() => ExerciseSession, session => session.attempts)
   @JoinColumn({ name: "session_id" })
-  session: IExerciseSession;
+  session: ExerciseSession;
 }

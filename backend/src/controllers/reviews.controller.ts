@@ -1,5 +1,3 @@
-// src/controllers/reviews.controller.ts
-
 import { RequestHandler } from 'express';
 import { AppDataSource } from '../config/database';
 import { User } from '../models/User';
@@ -14,6 +12,25 @@ export class SessionReviewController {
   static getUserSessions: RequestHandler = async (req, res) => {
     try {
       const { userId } = req.params;
+      
+      // Extract problemType from query parameters
+      const { problemType } = req.query;
+      
+      // Validate problemType parameter
+      if (!problemType) {
+        res.status(400).json({
+          error: 'Missing required query parameter: problemType'
+        });
+        return;
+      }
+      
+      // Validate problemType is one of the allowed values
+      if (problemType !== 'multiplication' && problemType !== 'missing_factor') {
+        res.status(400).json({
+          error: 'Invalid problemType parameter. Must be "multiplication" or "missing_factor".'
+        });
+        return;
+      }
       
       // Parse pagination parameters with defaults
       const page = parseInt(req.query.page as string) || 1;
@@ -47,15 +64,17 @@ export class SessionReviewController {
       
       // Get user ID as number
       const userIdNum = parseInt(userId);
+      const problemTypeStr = problemType as string;
       
       // Fetch performance summary and session list in parallel for better performance
       const [summary, sessionData] = await Promise.all([
-        getUserPerformanceSummary(userIdNum),
-        getUserSessions(userIdNum, page, limit)
+        getUserPerformanceSummary(userIdNum, problemTypeStr),
+        getUserSessions(userIdNum, page, limit, problemTypeStr)
       ]);
       
       // Combine results into the API response
       const response: SessionReviewResponse = {
+        problemType: problemTypeStr,
         summary,
         sessions: sessionData.sessions,
         pagination: sessionData.pagination
@@ -68,5 +87,4 @@ export class SessionReviewController {
       res.status(500).json({ error: 'Internal server error' });
     }
   };
-
 }
