@@ -1,8 +1,9 @@
-// src/components/Exercise/Exercise.tsx - Updated with problem type support
+// src/components/Exercise/Exercise.tsx - Updated with IncorrectAnswerView
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api, SessionSummary as SessionSummaryType, ProblemType } from '../../services/api';
 import ExerciseView from './ExerciseView';
+import IncorrectAnswerView from './IncorrectAnswerView';
 import CompletionMessage from './CompletionMessage';
 import SessionSummary from '../SessionSummary/SessionSummary';
 import LoadingView from './LoadingView';
@@ -31,6 +32,11 @@ const Exercise: React.FC = () => {
   const [correctCount, setCorrectCount] = useState(0);
   const [isProcessingAnswer, setIsProcessingAnswer] = useState(false);
   const [problemType, setProblemType] = useState<ProblemType>(ProblemType.MULTIPLICATION);
+  
+  // New state variables for incorrect answer view
+  const [showIncorrectView, setShowIncorrectView] = useState(false);
+  const [lastIncorrectProblem, setLastIncorrectProblem] = useState<Problem | null>(null);
+  const [lastIncorrectAnswer, setLastIncorrectAnswer] = useState('');
 
   const { 
     setStartTime, 
@@ -49,74 +55,73 @@ const Exercise: React.FC = () => {
   } = useEncouragementMessages();
 
   // Fetch session and first problem on mount
-  // Update the useEffect hook in Exercise.tsx that fetches the session and problem
-
-useEffect(() => {
-  const fetchSessionAndProblem = async () => {
-    try {
-      if (!sessionId) {
-        throw new Error('No session ID provided');
-      }
-      
-      const parsedSessionId = parseInt(sessionId);
-      
-      // First get the session details
-      const session = await api.getSession(parsedSessionId);
-      setTotalProblems(session.total_problems);
-      setProblemType(session.problem_type);
-      
-      // Check if session is already completed
-      if (session.is_completed) {
-        // If completed, fetch the session results instead of the next problem
+  useEffect(() => {
+    const fetchSessionAndProblem = async () => {
+      try {
+        if (!sessionId) {
+          throw new Error('No session ID provided');
+        }
+        
+        const parsedSessionId = parseInt(sessionId);
+        
+        // First get the session details
+        const session = await api.getSession(parsedSessionId);
+        setTotalProblems(session.total_problems);
+        setProblemType(session.problem_type);
+        
+        // Check if session is already completed
+        if (session.is_completed) {
+          // If completed, fetch the session results instead of the next problem
+          try {
+            // Get all attempts for this session to calculate correct count
+            const attempts = await api.getSessionAttempts(parsedSessionId);
+            const correctOnes = attempts.filter(a => a.isCorrect).length;
+            setCorrectCount(correctOnes);
+            
+            // Get the full session summary
+            const summary = await api.getSessionSummary(parsedSessionId);
+            setSessionSummary(summary);
+            setIsComplete(true);
+            setIsLoading(false);
+          } catch (summaryErr) {
+            console.error('Error fetching completed session summary:', summaryErr);
+            setError('Unable to load the session results. Please return to home and try again.');
+            setIsLoading(false);
+          }
+          return;
+        }
+        
+        // For active sessions, get the next problem
         try {
-          // Get all attempts for this session to calculate correct count
-          const attempts = await api.getSessionAttempts(parsedSessionId);
-          const correctOnes = attempts.filter(a => a.isCorrect).length;
-          setCorrectCount(correctOnes);
+          const problem = await api.getNextProblem(parsedSessionId);
           
-          // Get the full session summary
-          const summary = await api.getSessionSummary(parsedSessionId);
-          setSessionSummary(summary);
-          setIsComplete(true);
+          // Handle the type mismatch between api.Problem and Exercise.Problem
+          setCurrentProblem({
+            problemId: problem.problemId,
+            factor1: problem.factor1,
+            factor2: problem.factor2,
+            missingOperandPosition: problem.missingOperandPosition,
+            product: problem.product
+          });
+          
+          setResults(new Array(session.total_problems).fill(null));
+          setStartTime(Date.now());
           setIsLoading(false);
-        } catch (summaryErr) {
-          console.error('Error fetching completed session summary:', summaryErr);
-          setError('Unable to load the session results. Please return to home and try again.');
+        } catch (problemErr) {
+          console.error('Error fetching problem:', problemErr);
+          setError('Failed to load exercise problems. Please try again.');
           setIsLoading(false);
         }
-        return;
-      }
-      
-      // For active sessions, get the next problem
-      try {
-        const problem = await api.getNextProblem(parsedSessionId);
-        
-        // Handle the type mismatch between api.Problem and Exercise.Problem
-        setCurrentProblem({
-          problemId: problem.problemId,
-          factor1: problem.factor1,
-          factor2: problem.factor2,
-          missingOperandPosition: problem.missingOperandPosition,
-          product: problem.product // Include the product field
-        });
-        
-        setResults(new Array(session.total_problems).fill(null));
-        setStartTime(Date.now());
-        setIsLoading(false);
-      } catch (problemErr) {
-        console.error('Error fetching problem:', problemErr);
-        setError('Failed to load exercise problems. Please try again.');
+      } catch (err) {
+        console.error('Error fetching session:', err);
+        setError('Failed to load exercise session. Please try again.');
         setIsLoading(false);
       }
-    } catch (err) {
-      console.error('Error fetching session:', err);
-      setError('Failed to load exercise session. Please try again.');
-      setIsLoading(false);
-    }
-  };
+    };
 
-  fetchSessionAndProblem();
-}, [sessionId, setStartTime]);
+    fetchSessionAndProblem();
+  }, [sessionId, setStartTime]);
+
   const handleNext = async () => {
     if (!currentProblem || !sessionId || isPaused || isProcessingAnswer) return;
   
@@ -146,6 +151,13 @@ useEffect(() => {
       // Update correct count
       if (result.isCorrect) {
         setCorrectCount(prev => prev + 1);
+      } else {
+        // Store information about the incorrect answer for display
+        setLastIncorrectProblem(currentProblem);
+        setLastIncorrectAnswer(currentAnswer);
+        setShowIncorrectView(true);
+        setIsProcessingAnswer(false);
+        return; // Exit early to show incorrect view
       }
   
       // Handle session completion
@@ -178,7 +190,7 @@ useEffect(() => {
               factor1: nextProblem.factor1,
               factor2: nextProblem.factor2,
               missingOperandPosition: nextProblem.missingOperandPosition,
-              product: nextProblem.product // Include the product field
+              product: nextProblem.product
             });
             setCurrentAnswer('0');
             resetTimer();
@@ -200,7 +212,7 @@ useEffect(() => {
             factor1: nextProblem.factor1,
             factor2: nextProblem.factor2,
             missingOperandPosition: nextProblem.missingOperandPosition,
-            product: nextProblem.product // Include the product field
+            product: nextProblem.product
           });
           setCurrentAnswer('0');
           resetTimer();
@@ -214,6 +226,91 @@ useEffect(() => {
     } catch (err) {
       console.error('Error submitting attempt:', err);
       setError('Failed to submit answer. Please try again.');
+      setIsProcessingAnswer(false);
+    }
+  };
+
+  // New handler for continuing after incorrect answer view
+  const handleContinueAfterIncorrect = async () => {
+    setShowIncorrectView(false);
+    setIsProcessingAnswer(true);
+    
+    try {
+      if (!sessionId) {
+        throw new Error('No session ID available');
+      }
+      
+      const sessionIdNum = parseInt(sessionId);
+      
+      // First check if the session is already complete
+      const session = await api.getSession(sessionIdNum);
+      
+      if (session.is_completed) {
+        // Session is complete, show the summary instead of getting next problem
+        const attempts = await api.getSessionAttempts(sessionIdNum);
+        const correctOnes = attempts.filter(a => a.isCorrect).length;
+        setCorrectCount(correctOnes);
+        
+        const summary = await api.getSessionSummary(sessionIdNum);
+        setSessionSummary(summary);
+        setIsComplete(true);
+        setShowCompletionMessage(true);
+        
+        // After 2 seconds, hide the completion message to show the full summary
+        setTimeout(() => {
+          setShowCompletionMessage(false);
+        }, 2000);
+        
+        setIsProcessingAnswer(false);
+        return;
+      }
+      
+      // If session not complete, get the next problem
+      const nextProblem = await api.getNextProblem(sessionIdNum);
+      
+      setCurrentProblem({
+        problemId: nextProblem.problemId,
+        factor1: nextProblem.factor1,
+        factor2: nextProblem.factor2,
+        missingOperandPosition: nextProblem.missingOperandPosition,
+        product: nextProblem.product
+      });
+      setCurrentAnswer('0');
+      resetTimer();
+      setIsProcessingAnswer(false);
+    } catch (err) {
+      console.error('Error fetching next problem after incorrect answer:', err);
+      
+      // Check if this is a "Session is already completed" error
+      if (err instanceof Error && err.message.includes('completed')) {
+        try {
+          if (!sessionId) {
+            throw new Error('No session ID available');
+          }
+          
+          const sessionIdNum = parseInt(sessionId);
+          
+          // Try to get the session summary for the completed session
+          const attempts = await api.getSessionAttempts(sessionIdNum);
+          const correctOnes = attempts.filter(a => a.isCorrect).length;
+          setCorrectCount(correctOnes);
+          
+          const summary = await api.getSessionSummary(sessionIdNum);
+          setSessionSummary(summary);
+          setIsComplete(true);
+          setShowCompletionMessage(true);
+          
+          setTimeout(() => {
+            setShowCompletionMessage(false);
+          }, 2000);
+        } catch (summaryErr) {
+          console.error('Error fetching session summary:', summaryErr);
+          setError('Unable to load the session results. Please return to home and try again.');
+        }
+      } else {
+        setError('Failed to load the next problem. Please try again.');
+      }
+      
       setIsProcessingAnswer(false);
     }
   };
@@ -278,6 +375,48 @@ useEffect(() => {
 
   if (!currentProblem) {
     return <ErrorView error="Problem data is missing" onReturnHome={() => navigate('/')} />;
+  }
+
+  // Show the incorrect answer view when needed
+  if (showIncorrectView && lastIncorrectProblem) {
+    // Calculate the correct answer based on problem type
+    let correctAnswer: number;
+    
+    if (problemType === ProblemType.MISSING_FACTOR) {
+      // For missing factor problems, the correct answer is the missing factor
+      // We need to check which position is missing and use that value
+      if (lastIncorrectProblem.missingOperandPosition === 'first') {
+        // If first position is missing, we need the value that, when multiplied by factor2, gives product
+        const factor2 = lastIncorrectProblem.factor2 !== null ? lastIncorrectProblem.factor2 : 1;
+        const product = lastIncorrectProblem.product !== undefined ? lastIncorrectProblem.product : 0;
+        correctAnswer = factor2 !== 0 ? product / factor2 : 0;
+      } else {
+        // If second position is missing, we need the value that, when multiplied by factor1, gives product
+        const factor1 = lastIncorrectProblem.factor1 !== null ? lastIncorrectProblem.factor1 : 1;
+        const product = lastIncorrectProblem.product !== undefined ? lastIncorrectProblem.product : 0;
+        correctAnswer = factor1 !== 0 ? product / factor1 : 0;
+      }
+    } else {
+      // Handle regular multiplication problems
+      const factor1 = lastIncorrectProblem.factor1 !== null ? lastIncorrectProblem.factor1 : 0;
+      const factor2 = lastIncorrectProblem.factor2 !== null ? lastIncorrectProblem.factor2 : 0;
+      correctAnswer = factor1 * factor2;
+    }
+    
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <IncorrectAnswerView
+          problem={{
+            ...lastIncorrectProblem,
+            missingOperandPosition: lastIncorrectProblem.missingOperandPosition || 'second'
+          }}
+          userAnswer={lastIncorrectAnswer}
+          correctAnswer={correctAnswer}
+          onContinue={handleContinueAfterIncorrect}
+          problemType={problemType}
+        />
+      </div>
+    );
   }
 
   return (
