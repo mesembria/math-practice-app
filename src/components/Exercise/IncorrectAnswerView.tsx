@@ -85,28 +85,34 @@ const IncorrectAnswerView: React.FC<IncorrectAnswerViewProps> = ({
       {/* Answers Display */}
       <div className="w-full mb-4 space-y-4">
         {/* User's incorrect answer */}
-        <div className="flex items-center p-4 bg-red-50 border border-red-200 rounded-lg">
-          <div className="flex-shrink-0 mr-3">
-            <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div>
+        <div className="relative p-4 pt-6 bg-red-50 border border-red-200 rounded-lg">
+          <div className="absolute left-4 top-3">
             <p className="text-sm text-gray-600">Your answer</p>
-            <p className="text-xl font-bold text-red-600">{userAnswer}</p>
+          </div>
+
+          <div className="flex items-center mt-2">
+            <div className="flex-shrink-0 mr-3">
+              <svg className="w-6 h-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <span className="text-xl font-bold text-red-600 leading-none">{userAnswer}</span>
           </div>
         </div>
         
         {/* Correct answer */}
-        <div className="flex items-center p-4 bg-green-50 border border-green-200 rounded-lg">
-          <div className="flex-shrink-0 mr-3">
-            <svg className="w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div>
+        <div className="relative p-4 pt-6 bg-green-50 border border-green-200 rounded-lg">
+          <div className="absolute left-4 top-3">
             <p className="text-sm text-gray-600">Correct answer</p>
-            <p className="text-xl font-bold text-green-600">{correctAnswer}</p>
+          </div>
+
+          <div className="flex items-center mt-2">
+            <div className="flex-shrink-0 mr-3">
+              <svg className="w-6 h-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <span className="text-xl font-bold text-green-600 leading-none">{correctAnswer}</span>
           </div>
         </div>
       </div>

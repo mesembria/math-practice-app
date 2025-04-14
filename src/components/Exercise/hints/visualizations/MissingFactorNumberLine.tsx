@@ -13,10 +13,13 @@ interface MissingFactorNumberLineProps {
  */
 const MissingFactorNumberLine: React.FC<MissingFactorNumberLineProps> = ({
   known,
-  missing,
   product,
   problemText
 }) => {
+  // Validate that missing is correct (product / known)
+  // This ensures we always show the correct number of jumps
+  const actualJumps = Math.round(product / known);
+  
   return (
     <div className="p-2 bg-white rounded border border-yellow-200 my-2">
       <p>For the problem: {problemText}</p>
@@ -32,14 +35,14 @@ const MissingFactorNumberLine: React.FC<MissingFactorNumberLineProps> = ({
           <div className="absolute bottom-4 left-2 text-xs">0</div>
           
           {/* Jumps */}
-          {[...Array(Math.min(missing, 4))].map((_, i) => (
+          {[...Array(Math.min(actualJumps, 4))].map((_, i) => (
             <React.Fragment key={i}>
-              <div className="absolute bottom-0" style={{ left: `${(i+1) * (80/Math.max(missing, 4)) + 4}%` }}>
+              <div className="absolute bottom-0" style={{ left: `${(i+1) * (80/Math.max(actualJumps, 4)) + 4}%` }}>
                 <div className="h-3 w-1 bg-gray-600"></div>
                 <div className="absolute bottom-4 transform -translate-x-1/2 text-xs">{known * (i+1)}</div>
               </div>
               {/* Arrow */}
-              <div className="absolute bottom-8" style={{ left: `${(i * (80/Math.max(missing, 4)) + 4 + (40/Math.max(missing, 4)))}%` }}>
+              <div className="absolute bottom-8" style={{ left: `${(i * (80/Math.max(actualJumps, 4)) + 4 + (40/Math.max(actualJumps, 4)))}%` }}>
                 <div className="text-green-500 text-xs font-bold">+{known}</div>
                 <svg className="w-12 h-4 text-green-500" viewBox="0 0 24 8" fill="none">
                   <path d="M0 4H22M22 4L18 1M22 4L18 7" stroke="currentColor" strokeWidth="2"/>
@@ -48,7 +51,7 @@ const MissingFactorNumberLine: React.FC<MissingFactorNumberLineProps> = ({
             </React.Fragment>
           ))}
           
-          {missing > 4 && (
+          {actualJumps > 4 && (
             <div className="absolute right-12 bottom-8 text-green-600 text-xs">...more jumps</div>
           )}
           
@@ -56,7 +59,7 @@ const MissingFactorNumberLine: React.FC<MissingFactorNumberLineProps> = ({
           <div className="absolute bottom-0 right-4 h-3 w-1 bg-gray-600"></div>
           <div className="absolute bottom-4 right-2 text-xs font-bold text-green-600">{product}</div>
         </div>
-        <p className="text-sm">It takes {missing} jumps of {known} to reach {product}</p>
+        <p className="text-sm">It takes {actualJumps} jumps of {known} to reach {product}</p>
       </div>
     </div>
   );
